@@ -1,0 +1,6 @@
+{
+  "name": "فاکتور ساز کوارتز",
+  "description": "برنامه حرفه‌ای صدور فاکتور صنف سنگ کوارتز با لایسنس گذاری اختصاصی و خروجی PDF و چاپ باکیفیت",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
