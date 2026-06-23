@@ -15,32 +15,34 @@ jobs:
         distribution: 'zulu'
         java-version: '17'
 
-    # پیدا کردن پوشه کاتلین و تزریق کلید به local.properties
-    - name: Inject GEMINI_API_KEY
-      run: |
-        find . -name "local.properties" -exec sh -c 'echo "gemini.api.key=${{ secrets.GEMINI_API_KEY }}" >> "{}"' \;
-        find . -name "local.properties" -exec sh -c 'echo "apiKey=${{ secrets.GEMINI_API_KEY }}" >> "{}"' \;
-        echo "gemini.api.key=${{ secrets.GEMINI_API_KEY }}" >> local.properties
-
-    # پیدا کردن فایل اجرایی گریدل در پوشه‌های فرعی کاتلین
-    - name: Find and Make Gradlew Executable
+    # ۱. تولید خودکار گریدل در صورتی که در پروژه وجود نداشته باشد
+    - name: Generate Gradle Wrapper if Missing
       run: |
         GRADLEW_PATH=$(find . -name "gradlew" | head -n 1)
         if [ -z "$GRADLEW_PATH" ]; then
-          echo "Error: gradlew file not found anywhere in the repository!"
-          exit 1
+          echo "Gradlew missing. Generating a new gradle wrapper..."
+          gradle wrapper --gradle-version 8.2
+          echo "FOUND_DIR=." >> $GITHUB_ENV
         else
           chmod +x "$GRADLEW_PATH"
           echo "FOUND_DIR=$(dirname "$GRADLEW_PATH")" >> $GITHUB_ENV
         fi
 
-    # ورود به پوشه پروژه کاتلین و ساخت فایل APK
+    # ۲. تزریق کلید به فایل تنظیمات
+    - name: Inject GEMINI_API_KEY
+      run: |
+        cd "$FOUND_DIR"
+        touch local.properties
+        echo "gemini.api.key=${{ secrets.GEMINI_API_KEY }}" >> local.properties
+        echo "apiKey=${{ secrets.GEMINI_API_KEY }}" >> local.properties
+
+    # ۳. کامپایل و ساخت فایل نصب اندروید
     - name: Build APK with Gradle
       run: |
         cd "$FOUND_DIR"
         ./gradlew assembleDebug --stacktrace
 
-    # آپلود فایل نهایی نصب اندروید
+    # ۴. آپلود فایل APK ساخته شده
     - name: Upload Finished APK
       uses: actions/upload-artifact@v4
       with:
