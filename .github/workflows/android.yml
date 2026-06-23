@@ -9,27 +9,24 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # ۱. ارتقا به جاوا ۲۱ برای پشتیبانی از کتابخانه‌های جدید
     - name: Set up JDK 21
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '21'
 
-    # ۲. ساخت گریدل با نسخه ۸.۶ که با جاوا ۲۱ سازگار است
     - name: Generate Gradle Wrapper if Missing
       run: |
         GRADLEW_PATH=$(find . -name "gradlew" | head -n 1)
         if [ -z "$GRADLEW_PATH" ]; then
           echo "Gradlew missing. Generating a new gradle wrapper..."
-          gradle wrapper --gradle-version 8.6
+          gradle wrapper --gradle-version 9.3.1
           echo "FOUND_DIR=." >> $GITHUB_ENV
         else
           chmod +x "$GRADLEW_PATH"
           echo "FOUND_DIR=$(dirname "$GRADLEW_PATH")" >> $GITHUB_ENV
         fi
 
-    # ۳. تزریق کلید به فایل تنظیمات
     - name: Inject GEMINI_API_KEY
       run: |
         cd "$FOUND_DIR"
@@ -37,17 +34,14 @@ jobs:
         echo "gemini.api.key=${{ secrets.GEMINI_API_KEY }}" >> local.properties
         echo "apiKey=${{ secrets.GEMINI_API_KEY }}" >> local.properties
 
-    # ۴. پاک کردن کش قبلی کتابخانه مشکل‌ساز برای اطمینان از رفع خطا
     - name: Clear Gradle BouncyCastle cache
       run: rm -rf $HOME/.gradle/caches/modules-2/files-2.1/org.bouncycastle/bcprov-jdk18on || true
 
-    # ۵. کامپایل و ساخت نهایی APK
     - name: Build APK with Gradle
       run: |
         cd "$FOUND_DIR"
         ./gradlew assembleDebug --refresh-dependencies --stacktrace
 
-    # ۶. آپلود فایل نصب اندروید
     - name: Upload Finished APK
       uses: actions/upload-artifact@v4
       with:
