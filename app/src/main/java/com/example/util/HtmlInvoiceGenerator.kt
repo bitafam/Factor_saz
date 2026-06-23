@@ -2,6 +2,7 @@ package com.example.util
 
 import com.example.data.database.InvoiceEntity
 import com.example.data.database.ItemJsonConverter
+import com.example.data.model.*
 import java.text.DecimalFormat
 
 object HtmlInvoiceGenerator {
@@ -27,13 +28,18 @@ object HtmlInvoiceGenerator {
                         margin: 0;
                         font-size: 13px;
                     }
+                    @page {
+                        size: A4 portrait;
+                        margin: 16mm 14mm;
+                    }
                     .invoice-box {
                         max-width: 900px;
-                        margin: auto;
-                        padding: 25px;
-                        border: 1px solid #e0e0e0;
-                        border-radius: 8px;
+                        margin: 15px auto;
+                        padding: 35px;
+                        border: 5px double #00796b;
+                        border-radius: 12px;
                         background: #ffffff;
+                        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
                     }
                     .header-table {
                         width: 100%;
@@ -193,11 +199,14 @@ object HtmlInvoiceGenerator {
                         }
                         body {
                             padding: 0;
+                            margin: 0;
+                            background-color: #fff;
                         }
                         .invoice-box {
-                            border: none;
-                            padding: 0;
+                            border: 5px double #00796b !important;
+                            padding: 30px !important;
                             max-width: 100%;
+                            box-shadow: none !important;
                         }
                     }
                 </style>
@@ -207,8 +216,8 @@ object HtmlInvoiceGenerator {
                     <table class="header-table">
                         <tr>
                             <td class="header-logo-section">
-                                <div class="header-title">صنف سنگ کوارتز، توتم و دکتون</div>
-                                <div class="header-subtitle">طراحی، ساخت و نصب صفحات کابینت و کانترتاپ</div>
+                                <div class="header-title">${invoice.invoiceTitle}</div>
+                                <div class="header-subtitle">${invoice.invoiceSubtitle}</div>
                             </td>
                             <td class="header-meta">
                                 <div>شماره فاکتور: <span class="meta-badge">${invoice.invoiceNo}</span></div>
@@ -250,8 +259,8 @@ object HtmlInvoiceGenerator {
                                 <th style="width: 35%;">شرح کالا / خدمات</th>
                                 <th style="width: 11%;">عرض (cm)</th>
                                 <th style="width: 11%;">طول (m)</th>
-                                <th style="width: 13%;">فی عرض 60cm</th>
-                                <th style="width: 13%;">فی عرض ساخته شده</th>
+                                <th style="width: 14%;">فی عرض 60cm (ریال)</th>
+                                <th style="width: 14%;">فی عرض ساخته شده (ریال)</th>
                                 <th style="width: 12%;">مبلغ کل (ریال)</th>
                             </tr>
                         </thead>
@@ -273,9 +282,9 @@ object HtmlInvoiceGenerator {
                     <td style="text-align: right;">${item.description.ifBlank { "محاسبه سنگ کوارتز" }}</td>
                     <td>${item.width}</td>
                     <td>${item.length}</td>
-                    <td>${formatPrice(item.price60cm)}</td>
-                    <td>${formatAmount(finalPriceCalculated)}</td>
-                    <td>${formatAmount(totalAmountCalculated)}</td>
+                    <td>${formatPrice(item.price60cm)} ریال</td>
+                    <td>${formatAmount(finalPriceCalculated)} ریال</td>
+                    <td>${formatAmount(totalAmountCalculated)} ریال</td>
                 </tr>
             """.trimIndent())
         }
@@ -284,21 +293,47 @@ object HtmlInvoiceGenerator {
         for (item in simpleItems) {
             val amount = item.totalAmount
             calculatedTotal += amount
+            val descEx = if (item.quantityStr.isNotBlank()) {
+                "${item.description} (تعداد: ${item.quantityStr})"
+            } else {
+                item.description
+            }
 
             sb.append("""
                 <tr class="special-row">
                     <td>${itemIndex++}</td>
-                    <td style="text-align: right;">${item.description}</td>
+                    <td style="text-align: right;">${descEx}</td>
                     <td>-</td>
                     <td>-</td>
                     <td>-</td>
                     <td>-</td>
-                    <td>${formatPrice(item.totalAmountStr)}</td>
+                    <td>${formatAmount(item.totalAmount)} ریال</td>
                 </tr>
             """.trimIndent())
         }
 
-        // 3. Grand total row
+        // 3. Percentage items (calculated cumulative)
+        val baseTotal = calculatedTotal
+        val percentageItems = ItemJsonConverter.deserializePercentageItems(invoice.percentageItemsJson)
+        for (item in percentageItems) {
+            val pct = item.percentageStr.toDoubleOrNull() ?: 0.0
+            val percentAmount = (baseTotal * pct) / 100.0
+            calculatedTotal += percentAmount
+
+            sb.append("""
+                <tr style="background: #fffde7;">
+                    <td>${itemIndex++}</td>
+                    <td style="text-align: right;">${item.description} (${item.percentageStr} درصد)</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td>${formatAmount(percentAmount)} ریال</td>
+                </tr>
+            """.trimIndent())
+        }
+
+        // 4. Grand total row
         sb.append("""
                 <tr class="total-row">
                     <td colspan="6" style="text-align: left; padding: 12px;">جمع کل فاکتور:</td>
@@ -311,11 +346,19 @@ object HtmlInvoiceGenerator {
                 <tr>
                     <td class="signature-box">
                         <div class="signature-title">مهر و امضای ${invoice.managerSign.ifBlank { "مدیر فروش" }}</div>
-                        <div class="signature-line">امضاء</div>
+                        ${if (invoice.managerSignImgBase64.isNotBlank()) """
+                            <img src="${invoice.managerSignImgBase64}" style="max-height: 80px; max-width: 160px; margin-top: 8px; object-fit: contain; display: inline-block;" />
+                        """.trimIndent() else """
+                            <div class="signature-line">امضاء</div>
+                        """.trimIndent()}
                     </td>
                     <td class="signature-box">
                         <div class="signature-title">مهر و امضای ${invoice.salesSign.ifBlank { "مسئول فروش" }}</div>
-                        <div class="signature-line">امضاء</div>
+                        ${if (invoice.salesSignImgBase64.isNotBlank()) """
+                            <img src="${invoice.salesSignImgBase64}" style="max-height: 80px; max-width: 160px; margin-top: 8px; object-fit: contain; display: inline-block;" />
+                        """.trimIndent() else """
+                            <div class="signature-line">امضاء</div>
+                        """.trimIndent()}
                     </td>
                 </tr>
             </table>
@@ -331,8 +374,212 @@ object HtmlInvoiceGenerator {
         return sb.toString()
     }
 
+    fun generateSummaryHtml(startDate: String, endDate: String, invoices: List<InvoiceEntity>): String {
+        val df = DecimalFormat("#,###")
+        val grandTotal = invoices.sumOf { it.totalAmount }
+        
+        val sb = StringBuilder()
+        sb.append("""
+            <!DOCTYPE html>
+            <html lang="fa" dir="rtl">
+            <head>
+                <meta charset="UTF-8">
+                <title>خلاصه کارکرد و فاکتورهای فروش</title>
+                <style>
+                    @font-face {
+                        font-family: 'Vazir';
+                        src: local('Vazir'), local('Tahoma');
+                    }
+                    body {
+                        font-family: 'Tahoma', 'Vazir', sans-serif;
+                        margin: 0;
+                        padding: 10px;
+                        background-color: #f5f5f5;
+                        color: #1a1a1a;
+                        -webkit-print-color-adjust: exact;
+                        font-size: 11px;
+                    }
+                    @page {
+                        size: A4 portrait;
+                        margin: 16mm 14mm;
+                    }
+                    .report-container {
+                        max-width: 800px;
+                        margin: 15px auto;
+                        background: #fff;
+                        padding: 35px;
+                        border-radius: 12px;
+                        border: 5px double #004d40;
+                        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+                    }
+                    .header-section {
+                        text-align: center;
+                        border-bottom: 2px solid #004d40;
+                        padding-bottom: 10px;
+                        margin-bottom: 20px;
+                    }
+                    .header-title {
+                        font-size: 18px;
+                        font-weight: bold;
+                        color: #004d40;
+                        margin: 0 0 6px 0;
+                    }
+                    .header-subtitle {
+                        font-size: 12px;
+                        color: #555;
+                        margin: 0;
+                    }
+                    .info-grid {
+                        display: flex;
+                        justify-content: space-between;
+                        font-size: 11px;
+                        color: #444;
+                        margin-bottom: 15px;
+                        padding: 8px 12px;
+                        background-color: #f9f9f9;
+                        border: 1px solid #eee;
+                        border-radius: 4px;
+                    }
+                    table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-bottom: 25px;
+                        font-size: 11px;
+                        text-align: center;
+                    }
+                    th {
+                        background-color: #004d40;
+                        color: white;
+                        font-weight: bold;
+                        padding: 8px;
+                        border: 1px solid #ccc;
+                    }
+                    td {
+                        padding: 8px;
+                        border: 1px solid #ccc;
+                    }
+                    tr:nth-child(even) {
+                        background-color: #fafafa;
+                    }
+                    .total-box {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        background: #e0f2f1;
+                        border: 2px solid #004d40;
+                        padding: 12px 16px;
+                        border-radius: 6px;
+                        font-size: 13px;
+                        font-weight: bold;
+                        color: #004d40;
+                    }
+                    .print-btn-container {
+                        text-align: center;
+                        margin-top: 20px;
+                    }
+                    .print-btn {
+                        background-color: #004d40;
+                        color: white;
+                        border: none;
+                        padding: 8px 20px;
+                        font-size: 12px;
+                        font-weight: bold;
+                        border-radius: 4px;
+                        cursor: pointer;
+                    }
+                    @media print {
+                        body {
+                            background-color: #fff;
+                            padding: 0;
+                            margin: 0;
+                        }
+                        .report-container {
+                            border: 5px double #004d40 !important;
+                            margin: 0;
+                            padding: 30px !important;
+                            max-width: 100%;
+                            box-shadow: none !important;
+                        }
+                        .print-btn-container {
+                            display: none;
+                        }
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="report-container">
+                    <div class="header-section">
+                        <h1 class="header-title">خلاصه کارکرد و فاکتورهای فروش</h1>
+                        <h2 class="header-subtitle">گزارش دوره‌ای تراکنش‌ها و اسناد صادره صنایع سنگ</h2>
+                    </div>
+                    
+                    <div class="info-grid">
+                        <div><strong>بازه زمانی گزارش:</strong> از تاریخ ${startDate} تا ${endDate}</div>
+                        <div><strong>تاریخ صدور گزارش:</strong> ${getTodayJalaliDate()}</div>
+                    </div>
+                    
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="width: 5%;">ردیف</th>
+                                <th style="width: 25%;">نام خریدار</th>
+                                <th style="width: 15%;">شماره تماس</th>
+                                <th style="width: 15%;">کد سنگ / توضیحات</th>
+                                <th style="width: 15%;">تاریخ صدور</th>
+                                <th style="width: 25%;">مبلغ کل فاکتور (ریال)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        """.trimIndent())
+        
+        invoices.forEachIndexed { idx, inv ->
+            val codeDesc = buildString {
+                if (inv.stoneCode.isNotBlank()) append(inv.stoneCode)
+                if (inv.stoneType.isNotBlank()) {
+                    if (isNotEmpty()) append(" - ")
+                    append(inv.stoneType)
+                }
+                if (isEmpty()) append("-")
+            }
+            sb.append("""
+                <tr>
+                    <td>${idx + 1}</td>
+                    <td style="text-align: right; font-weight: bold;">${inv.buyerName.ifBlank { "نامشخص" }}</td>
+                    <td>${inv.sellerPhone.ifBlank { inv.invoiceNo }}</td>
+                    <td>${codeDesc}</td>
+                    <td>${inv.invoiceDate}</td>
+                    <td style="font-weight: bold; color: #004d40;">${df.format(inv.totalAmount)} ریال</td>
+                </tr>
+            """.trimIndent())
+        }
+        
+        sb.append("""
+                        </tbody>
+                    </table>
+                    
+                    <div class="total-box">
+                        <div>تعداد کل فاکتورهای دوره: ${invoices.size} فقره</div>
+                        <div>جمع کل درآمد: ${df.format(grandTotal)} ریال</div>
+                    </div>
+                    
+                    <div class="print-btn-container">
+                        <button class="print-btn" onclick="window.print()">چاپ و ذخیره گزارش خلاصه (A4)</button>
+                    </div>
+                </div>
+            </body>
+            </html>
+        """.trimIndent())
+        
+        return sb.toString()
+    }
+
+    private fun getTodayJalaliDate(): String {
+        return JalaliCalendar.getTodayJalali()
+    }
+
     private fun formatPrice(priceStr: String): String {
-        val d = priceStr.toDoubleOrNull() ?: return "0"
+        val cleaned = priceStr.replace(",", "").trim()
+        val d = cleaned.toDoubleOrNull() ?: return "0"
         return df.format(d)
     }
 

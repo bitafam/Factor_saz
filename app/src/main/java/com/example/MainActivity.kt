@@ -19,7 +19,7 @@ class MainActivity : ComponentActivity() {
 
         // Initialize SQLite Room database, DAOs, and repository context
         val database = AppDatabase.getDatabase(applicationContext)
-        val repository = InvoiceRepository(database.invoiceDao(), database.configDao())
+        val repository = InvoiceRepository(database.invoiceDao(), database.configDao(), database.activatedDeviceDao())
 
         // Create the state-holding ViewModel using standard Provider with factory
         val factory = InvoiceViewModelFactory(repository, applicationContext)

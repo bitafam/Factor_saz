@@ -10,7 +10,7 @@ data class ComposeInvoiceItem(
     val finalPrice: Double
         get() = try {
             val w = width.toDoubleOrNull() ?: 0.0
-            val p60 = price60cm.toDoubleOrNull() ?: 0.0
+            val p60 = price60cm.replace(",", "").toDoubleOrNull() ?: 0.0
             if (w > 0 && p60 > 0) {
                 (p60 * w) / 60.0
             } else 0.0
@@ -26,8 +26,20 @@ data class ComposeInvoiceItem(
 data class ComposeSimpleItem(
     val id: String = java.util.UUID.randomUUID().toString(),
     val description: String = "",
-    val totalAmountStr: String = ""
+    val totalAmountStr: String = "",
+    val quantityStr: String = "" // Optional count/quantity
 ) {
     val totalAmount: Double
-        get() = totalAmountStr.toDoubleOrNull() ?: 0.0
+        get() {
+            val amount = totalAmountStr.replace(",", "").toDoubleOrNull() ?: 0.0
+            val qty = quantityStr.toDoubleOrNull() ?: 1.0
+            return amount * qty
+        }
 }
+
+data class ComposePercentageItem(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val description: String = "", // e.g., "اجرت نصب"
+    val percentageStr: String = "" // e.g., "10"
+)
+
