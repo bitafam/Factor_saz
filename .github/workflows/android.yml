@@ -1,4 +1,4 @@
-name: Android Build
+name: Android Kotlin Build
 
 on:
   workflow_dispatch:
@@ -15,24 +15,35 @@ jobs:
         distribution: 'zulu'
         java-version: '17'
 
-    # این بخش مطمئن می‌شود که فایل local.properties وجود دارد و کلید را درون آن می‌گذارد
-    - name: Inject API Key
+    # پیدا کردن پوشه کاتلین و تزریق کلید به local.properties
+    - name: Inject GEMINI_API_KEY
       run: |
-        touch local.properties
+        find . -name "local.properties" -exec sh -c 'echo "gemini.api.key=${{ secrets.GEMINI_API_KEY }}" >> "{}"' \;
+        find . -name "local.properties" -exec sh -c 'echo "apiKey=${{ secrets.GEMINI_API_KEY }}" >> "{}"' \;
         echo "gemini.api.key=${{ secrets.GEMINI_API_KEY }}" >> local.properties
-        echo "apiKey=${{ secrets.GEMINI_API_KEY }}" >> local.properties
 
-    - name: Make Gradlew Executable
-      run: chmod +x gradlew
+    # پیدا کردن فایل اجرایی گریدل در پوشه‌های فرعی کاتلین
+    - name: Find and Make Gradlew Executable
+      run: |
+        GRADLEW_PATH=$(find . -name "gradlew" | head -n 1)
+        if [ -z "$GRADLEW_PATH" ]; then
+          echo "Error: gradlew file not found anywhere in the repository!"
+          exit 1
+        else
+          chmod +x "$GRADLEW_PATH"
+          echo "FOUND_DIR=$(dirname "$GRADLEW_PATH")" >> $GITHUB_ENV
+        fi
 
-    # اجرای گریدل با قابلیت عیب‌یابی دقیق‌تر
-    - name: Build APK
-      run: ./gradlew assembleDebug --stacktrace
+    # ورود به پوشه پروژه کاتلین و ساخت فایل APK
+    - name: Build APK with Gradle
+      run: |
+        cd "$FOUND_DIR"
+        ./gradlew assembleDebug --stacktrace
 
-    # پیدا کردن خودکار فایل APK در هر پوشه‌ای که ساخته شده باشد
+    # آپلود فایل نهایی نصب اندروید
     - name: Upload Finished APK
       uses: actions/upload-artifact@v4
       with:
-        name: MyAndroidApp
+        name: GeminiKotlinApp
         path: "**/build/outputs/apk/debug/*.apk"
         
