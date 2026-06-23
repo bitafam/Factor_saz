@@ -37,6 +37,25 @@ jobs:
     - name: Clear Gradle BouncyCastle cache
       run: rm -rf $HOME/.gradle/caches/modules-2/files-2.1/org.bouncycastle/bcprov-jdk18on || true
 
+    - name: Create debug.keystore if missing
+      run: |
+        cd "$FOUND_DIR"
+        if [ ! -f "$FOUND_DIR/debug.keystore" ]; then
+          keytool -genkeypair -v \
+            -keystore "$FOUND_DIR/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000
+        fi
+        mkdir -p "$HOME/.android"
+        if [ ! -f "$HOME/.android/debug.keystore" ]; then
+          cp "$FOUND_DIR/debug.keystore" "$HOME/.android/debug.keystore"
+        fi
+
     - name: Build APK with Gradle
       run: |
         cd "$FOUND_DIR"
