@@ -25,7 +25,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: wrapper
+          gradle-version: '8.11.1'
           validate-wrappers: false
 
       - name: Create .env File
@@ -46,14 +46,11 @@ jobs:
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Make Gradle Wrapper Executable
-        run: chmod +x gradlew
-
       - name: Run Code Compilation & Unit Tests
-        run: ./gradlew testDebugUnitTest
+        run: gradle testDebugUnitTest
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug
+        run: gradle assembleDebug
 
       - name: Setup Release Keystore (Optional)
         run: |
@@ -72,7 +69,7 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEYSTORE_PATH: my-upload-key.jks
-        run: ./gradlew assembleRelease
+        run: gradle assembleRelease
 
       - name: Build Signed Release Bundle (AAB)
         if: env.HAS_RELEASE_KEYSTORE == 'true'
@@ -80,7 +77,7 @@ jobs:
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEYSTORE_PATH: my-upload-key.jks
-        run: ./gradlew bundleRelease
+        run: gradle bundleRelease
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
