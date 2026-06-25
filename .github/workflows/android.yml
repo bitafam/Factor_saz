@@ -43,7 +43,8 @@ jobs:
             echo "Decoding debug keystore from base64..."
             base64 -d debug.keystore.base64 > debug.keystore
           else
-            echo "No debug.keystore.base64 found! Gradle will generate a default one, which might change the signature."
+            echo "No debug.keystore.base64 found! Generating a new debug keystore..."
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
       - name: Make Gradle Wrapper Executable
@@ -55,10 +56,55 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug
 
+      - name: Setup Release Keystore (Optional)
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "Decoding release keystore..."
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > my-upload-key.jks
+            echo "HAS_RELEASE_KEYSTORE=true" >> $GITHUB_ENV
+          else
+            echo "No release keystore secret provided. Skipping release signing."
+            echo "HAS_RELEASE_KEYSTORE=false" >> $GITHUB_ENV
+          fi
+
+      - name: Build Signed Release APK
+        if: env.HAS_RELEASE_KEYSTORE == 'true'
+        env:
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEYSTORE_PATH: my-upload-key.jks
+        run: ./gradlew assembleRelease
+
+      - name: Build Signed Release Bundle (AAB)
+        if: env.HAS_RELEASE_KEYSTORE == 'true'
+        env:
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEYSTORE_PATH: my-upload-key.jks
+        run: ./gradlew bundleRelease
+
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: Quartz-Invoice-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Release APK
+        if: env.HAS_RELEASE_KEYSTORE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quartz-Invoice-Release-APK
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Release Bundle (AAB)
+        if: env.HAS_RELEASE_KEYSTORE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Quartz-Invoice-Release-AAB
+          path: app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 7
