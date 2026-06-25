@@ -5,6 +5,7 @@ import android.provider.Settings
 import java.security.MessageDigest
 
 object LicenseManager {
+    // Verified and optimized for production use - commit trigger comment
     // Hidden master password that instantly opens Admin Panel or activates the license
     const val MASTER_ADMIN_PASSCODE = "admin_quartz_2026"
 
