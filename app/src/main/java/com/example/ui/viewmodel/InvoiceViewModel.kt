@@ -1032,10 +1032,17 @@ class InvoiceViewModel(
         }
 
         var importedInvoicesCount = 0
+        val existingList = repository.getAllInvoicesDirect()
         for (inv in result.invoices) {
-            repository.insertInvoice(inv)
+            val match = existingList.find { it.invoiceNo.isNotBlank() && it.invoiceNo == inv.invoiceNo && it.buyerName == inv.buyerName && it.invoiceDate == inv.invoiceDate }
+            val cleanInv = if (match != null) {
+                inv.copy(id = match.id, isDeleted = false)
+            } else {
+                inv.copy(id = 0, isDeleted = false)
+            }
+            repository.insertInvoice(cleanInv)
             // Re-sync backup file locally
-            InvoiceBackupManager.saveInvoiceBackup(inv)
+            InvoiceBackupManager.saveInvoiceBackup(cleanInv)
             importedInvoicesCount++
         }
 
@@ -1082,6 +1089,46 @@ class InvoiceViewModel(
             val licenseMsg = if (result.devicesCount > 0) " و ${result.devicesCount} لایسنس همکاران" else ""
             backupOperationMessage = "بازیابی با موفقیت کامل انجام شد:\n• $importedInvoicesCount فاکتور بازیابی گردید.\n$configMsg$licenseMsg"
             Toast.makeText(context, "✅ بازیابی موفقیت‌آمیز بود ($importedInvoicesCount فاکتور)", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    /**
+     * Imports a single .qzb or json invoice backup file and adds it to the saved list.
+     */
+    fun importSingleQzbFile(context: Context, uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            isBackupOperationLoading = true
+            try {
+                val json = context.contentResolver.openInputStream(uri)?.use { 
+                    java.io.BufferedReader(java.io.InputStreamReader(it, Charsets.UTF_8)).readText() 
+                } ?: ""
+
+                val parseResult = InvoiceBackupManager.parseBackupContent(json)
+                if (parseResult.success && parseResult.invoices.isNotEmpty()) {
+                    var count = 0
+                    for (inv in parseResult.invoices) {
+                        val cleanInv = inv.copy(id = 0, isDeleted = false)
+                        repository.insertInvoice(cleanInv)
+                        InvoiceBackupManager.saveInvoiceBackup(cleanInv)
+                        count++
+                    }
+                    refreshAvailableBackups()
+                    withContext(Dispatchers.Main) {
+                        isBackupOperationLoading = false
+                        Toast.makeText(context, "✅ $count فاکتور با موفقیت به لیست اضافه شد", Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        isBackupOperationLoading = false
+                        Toast.makeText(context, "فایل انتخابی معتبر نیست یا فاکتوری در آن یافت نشد", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    Toast.makeText(context, "خطا در خواندن فایل: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 

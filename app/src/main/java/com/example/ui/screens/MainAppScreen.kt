@@ -2059,6 +2059,14 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
         }
     }
 
+    val singleQzbPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.importSingleQzbFile(context, uri)
+        }
+    }
+
     val filteredList = remember(savedList, searchQuery) {
         if (searchQuery.isBlank()) {
             savedList
@@ -2153,7 +2161,7 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Button(
                             onClick = { viewModel.createAndShareFullBackup(context) },
@@ -2162,11 +2170,29 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                                 contentColor = Color.White
                             ),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1.2f).height(38.dp)
+                            modifier = Modifier.weight(1f).height(38.dp)
                         ) {
-                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("ارسال یکجا به همکار", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text("ارسال همکار", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = {
+                                singleQzbPickerLauncher.launch(
+                                    arrayOf("*/*", "application/json", "application/octet-stream")
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary,
+                                contentColor = MaterialTheme.colorScheme.onSecondary
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1.1f).height(38.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text("افزودن تکی .qzb", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
 
                         Button(
@@ -2180,11 +2206,11 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                                 contentColor = MaterialTheme.colorScheme.onPrimary
                             ),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1.3f).height(38.dp)
+                            modifier = Modifier.weight(1.1f).height(38.dp)
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("دریافت فاکتورهای همکار", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.AddCircle, contentDescription = null, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text("بسته همکار", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
