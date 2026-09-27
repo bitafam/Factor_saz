@@ -292,26 +292,23 @@ class InvoiceViewModel(
     }
 
     fun applyParsedInvoice(parsed: com.example.util.importer.ParsedInvoiceResult) {
+        // Only update non-default per-invoice fields to protect user's configured default settings
         if (parsed.invoiceNo.isNotBlank()) invoiceNo = parsed.invoiceNo
         if (parsed.invoiceDate.isNotBlank()) invoiceDate = parsed.invoiceDate
         if (parsed.buyerName.isNotBlank()) buyerName = parsed.buyerName
-        if (parsed.sellerName.isNotBlank()) sellerName = parsed.sellerName
-        if (parsed.sellerPhone.isNotBlank()) sellerPhone = parsed.sellerPhone
-        if (parsed.sellerAddress.isNotBlank()) sellerAddress = parsed.sellerAddress
         if (parsed.stoneCode.isNotBlank()) stoneCode = parsed.stoneCode
         if (parsed.stoneType.isNotBlank()) stoneType = parsed.stoneType
-        if (parsed.invoiceTitle.isNotBlank()) invoiceTitle = parsed.invoiceTitle
-        if (parsed.invoiceSubtitle.isNotBlank()) invoiceSubtitle = parsed.invoiceSubtitle
-        if (parsed.managerSign.isNotBlank()) managerSign = parsed.managerSign
-        if (parsed.salesSign.isNotBlank()) salesSign = parsed.salesSign
 
-        if (parsed.normalItems.isNotEmpty()) {
+        // Update items lists
+        if (parsed.normalItems.isNotEmpty() || parsed.simpleItems.isNotEmpty()) {
             normalItems.clear()
-            normalItems.addAll(parsed.normalItems)
-        }
-        if (parsed.simpleItems.isNotEmpty()) {
+            if (parsed.normalItems.isNotEmpty()) {
+                normalItems.addAll(parsed.normalItems)
+            }
             simpleItems.clear()
-            simpleItems.addAll(parsed.simpleItems)
+            if (parsed.simpleItems.isNotEmpty()) {
+                simpleItems.addAll(parsed.simpleItems)
+            }
         }
         if (parsed.percentageItems.isNotEmpty()) {
             percentageItems.clear()
@@ -319,7 +316,7 @@ class InvoiceViewModel(
         }
         closeImportDialog()
         navigateTo("EDITOR")
-        Toast.makeText(context, "فاکتور با موفقیت (${parsed.totalItemsCount} ردیف) در فاکتورساز بارگذاری شد", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "فاکتور با موفقیت (${parsed.totalItemsCount} ردیف) در فاکتورساز بارگذاری شد (اطلاعات پیش‌فرض حفظ شد)", Toast.LENGTH_LONG).show()
     }
 
     // Update permanent default settings

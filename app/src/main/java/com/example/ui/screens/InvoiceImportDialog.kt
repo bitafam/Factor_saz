@@ -376,10 +376,16 @@ private fun PreviewExtractedInvoiceView(
                     if (result.buyerName.isNotBlank()) {
                         Text("خریدار: ${result.buyerName}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                     }
-                    if (result.sellerName.isNotBlank()) {
-                        Text("فروشنده: ${result.sellerName}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (result.stoneCode.isNotBlank() || result.stoneType.isNotBlank()) {
+                        Text("سنگ: ${result.stoneType} ${result.stoneCode}".trim(), fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
                     }
                 }
+                
+                Text(
+                    text = "🔒 تنظیمات پیش‌فرض فروشنده، عنوان و امضاها بدون تغییر حفظ خواهند شد.",
+                    fontSize = 10.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                )
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),

@@ -31,6 +31,68 @@ object TextNormalizer {
     }
 
     /**
+     * Extracts only the clean product / service title, stripping all digits, prices, currencies, and punctuation.
+     */
+    fun extractCleanTitle(raw: String): String {
+        val fixed = fixReversedPersian(raw)
+        var text = cleanText(fixed)
+
+        // Remove row index numbers at beginning like "1-", "2.", "۱-", "۱ "
+        text = text.replace(Regex("""^[0-9۰-۹٠-٩]+[\s\.\-–:：]+"""), "")
+
+        // Remove explicit quantities like "1 عدد", "۲ عدد", "1دستگاه", "1عدد"
+        text = text.replace(Regex("""[0-9۰-۹٠-٩]+\s*(?:عدد|دستگاه|شاخه|متر|ساعت|نفر)"""), "")
+
+        // Remove currency words and symbols
+        text = text
+            .replace("ریال", "")
+            .replace("تومان", "")
+            .replace("تومن", "")
+            .replace("Rials", "")
+            .replace("Rial", "")
+            .replace("IRR", "")
+
+        // Remove table header / label keywords if stuck to title
+        text = text
+            .replace(Regex("""(?:مبلغ کل|مبلغ|فی پایه|قیمت کل|قیمت|جمع کل|شرح کالا|شرح)\s*[:：]?"""), "")
+
+        // Remove all numbers (both integer and decimals / comma-separated)
+        text = text.replace(Regex("""[0-9۰-۹٠-٩]+(?:[\,\.٫/][0-9۰-۹٠-٩]+)*"""), "")
+
+        // Remove punctuation and leftover brackets / dashes
+        text = text
+            .replace(Regex("""[,\/\\\:\：\*\-\–\—\_]"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+
+        return text
+    }
+
+    /**
+     * Extracts all numeric values from text (handling Persian digits, commas, and decimals).
+     */
+    fun extractAllNumbers(input: String): List<Double> {
+        val eng = toEnglishDigits(input)
+        val matches = Regex("""(\d+(?:[.,/]\d+)?)""").findAll(eng.replace(",", ""))
+        val list = mutableListOf<Double>()
+        for (m in matches) {
+            val raw = m.groupValues[1].replace('/', '.')
+            val d = raw.toDoubleOrNull()
+            if (d != null) list.add(d)
+        }
+        return list
+    }
+
+    /**
+     * Extracts quantity if specified (e.g. "2 عدد", "3 دستگاه"), defaulting to "1".
+     */
+    fun extractQuantity(input: String): String {
+        val eng = toEnglishDigits(input)
+        val match = Regex("""(\d+)\s*(?:عدد|دستگاه|شاخه|متر|نفر|ساعت)""").find(eng)
+        return match?.groupValues?.get(1) ?: "1"
+    }
+
+    /**
      * Parse monetary or number string (e.g. "115,000,000", "586,500,000", "2.55", "3/4")
      */
     fun parseNumber(str: String): Double? {
