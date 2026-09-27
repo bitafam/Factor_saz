@@ -98,10 +98,10 @@ jobs:
         id: prepare_files
         run: |
           mkdir -p release_outputs
-          cp app/build/outputs/apk/debug/*.apk release_outputs/QuartzInvoice-v1.0.${{ github.run_number }}-debug.apk || true
+          cp app/build/outputs/apk/debug/*.apk release_outputs/QuartzInvoice-v2.0.${{ github.run_number }}-debug.apk || true
           if [ "${{ env.HAS_RELEASE_KEYSTORE }}" = "true" ]; then
-            cp app/build/outputs/apk/release/*.apk release_outputs/QuartzInvoice-v1.0.${{ github.run_number }}-release.apk || true
-            cp app/build/outputs/bundle/release/*.aab release_outputs/QuartzInvoice-v1.0.${{ github.run_number }}-release.aab || true
+            cp app/build/outputs/apk/release/*.apk release_outputs/QuartzInvoice-v2.0.${{ github.run_number }}-release.apk || true
+            cp app/build/outputs/bundle/release/*.aab release_outputs/QuartzInvoice-v2.0.${{ github.run_number }}-release.aab || true
           fi
           echo "Output files prepared in release_outputs:"
           ls -la release_outputs
@@ -110,19 +110,19 @@ jobs:
         if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))) || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v1.0.{0}', github.run_number) }}
-          name: ${{ startsWith(github.ref, 'refs/tags/') && format('Release {0}', github.ref_name) || format('Quartz Invoice v1.0.{0}', github.run_number) }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v2.0.{0}', github.run_number) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && format('Release {0}', github.ref_name) || format('Quartz Invoice v2.0.{0}', github.run_number) }}
           draft: false
           prerelease: false
           make_latest: true
           files: release_outputs/*
           body: |
-            ### 📱 فاکتور ساز سنگ کوارتز - نسخه ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v1.0.{0}', github.run_number) }}
+            ### 📱 فاکتور ساز سنگ کوارتز - نسخه ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v2.0.{0}', github.run_number) }}
             
             فایل‌های نصبی برنامه به صورت خودکار بیلد و در بخش Releases منتشر شدند:
             
-            - **فایل نصبی اصلی (APK):** `QuartzInvoice-v1.0.${{ github.run_number }}-debug.apk`
+            - **فایل نصبی اصلی (APK):** `QuartzInvoice-v2.0.${{ github.run_number }}-debug.apk`
             - **وضعیت تست‌ها:** ✅ پاس شده و آماده نصب روی گوشی
-            - **تاریخ و شماره ساخت:** ${{ github.run_number }}
+            - **شماره بیلد:** ${{ github.run_number }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
