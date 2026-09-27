@@ -9,6 +9,43 @@ object TextNormalizer {
         '٥' to '5', '٦' to '6', '٧' to '7', '٨' to '8', '٩' to '9'
     )
 
+    private val REVERSED_PHRASES = listOf(
+        "یف رع 60cm" to "فی عرض 60cm",
+        "یف عرض هتخاس شده" to "فی عرض ساخته شده",
+        "غلبم لک" to "مبلغ کل",
+        "عمج لک" to "جمع کل",
+        "دک سنگ" to "کد سنگ",
+        "فیدر شرح لااک" to "ردیف شرح کالا",
+        "شرح لااک" to "شرح کالا",
+        "متوت، کاینداستون، زتراوک" to "توتم، کاینداستون، کوارتز",
+        "صفحات تنیباک" to "صفحات کابینت",
+        "دنیاک استون" to "کایند استون",
+        "هحفص و دیوار رختسا" to "صفحه و دیوار استخر",
+        "هحفص هقبط اول" to "صفحه طبقه اول",
+        "هحفص فکمه" to "صفحه همکف",
+        "هحفص خبطم" to "صفحه مطبخ",
+        "هحفص" to "صفحه",
+        "خبطم" to "مطبخ",
+        "فکمه" to "همکف",
+        "هقبط اول" to "طبقه اول",
+        "هقبط" to "طبقه",
+        "رختسا" to "استخر",
+        "هتخاس" to "ساخته",
+        "هیشاح" to "حاشیه",
+        "تمسق هود" to "قسمت دوم",
+        "تمسق" to "قسمت",
+        "هود" to "دوم",
+        "یعیبط" to "طبیعی",
+        "ینیسح" to "حسینی",
+        "خیرات" to "تاریخ",
+        "نفلت" to "تلفن",
+        "فیدر" to "ردیف",
+        "لااک" to "کالا",
+        "تنیباک" to "کابینت",
+        "زتراوک" to "کوارتز",
+        "متوت" to "توتم"
+    )
+
     fun toEnglishDigits(input: String): String {
         val sb = StringBuilder(input.length)
         for (ch in input) {
@@ -57,7 +94,6 @@ object TextNormalizer {
 
         // If it has commas (e.g. 115,000,000), strip commas if used as thousands separators
         if (normalized.contains(",")) {
-            // If comma is used like 3,4 and no other commas, treat as decimal, else remove
             if (normalized.count { it == ',' } == 1 && normalized.substringAfter(',').length <= 2) {
                 normalized = normalized.replace(',', '.')
             } else {
@@ -69,42 +105,15 @@ object TextNormalizer {
     }
 
     /**
-     * Checks whether text extracted from PDF appears to be visually reversed (common in RTL PDFs).
-     */
-    fun isVisuallyReversed(text: String): Boolean {
-        val reversedIndicators = listOf(
-            "یف رع", "غلبم لک", "فیدر", "هحفص", "رختسا", "هتخاس", "خیرات", "هقبط", "متوت", "زتراوک"
-        )
-        return reversedIndicators.any { text.contains(it) }
-    }
-
-    /**
-     * If Persian word characters are reversed, fixes each Persian token while preserving English/digits.
+     * Normalizes reversed phrases in PDF text.
      */
     fun fixReversedPersian(line: String): String {
-        if (!isVisuallyReversed(line)) return line
-
-        val sb = StringBuilder()
-        var i = 0
-        while (i < line.length) {
-            val ch = line[i]
-            if (isPersianLetter(ch)) {
-                val start = i
-                while (i < line.length && (isPersianLetter(line[i]) || line[i] == '‌')) {
-                    i++
-                }
-                val persianWord = line.substring(start, i)
-                sb.append(persianWord.reversed())
-            } else {
-                sb.append(ch)
-                i++
+        var fixedLine = line
+        for ((rev, orig) in REVERSED_PHRASES) {
+            if (fixedLine.contains(rev)) {
+                fixedLine = fixedLine.replace(rev, orig)
             }
         }
-        return sb.toString()
-    }
-
-    private fun isPersianLetter(ch: Char): Boolean {
-        val code = ch.code
-        return (code in 0x0600..0x06FF) || (code in 0xFB50..0xFDFF) || (code in 0xFE70..0xFEFF)
+        return fixedLine
     }
 }

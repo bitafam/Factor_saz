@@ -19,6 +19,53 @@ class InvoiceImportTest {
 
         val decimalSlash = TextNormalizer.parseNumber("۳/۴")
         assertEquals(3.4, decimalSlash!!, 0.01)
+
+        val decimalDot = TextNormalizer.parseNumber(".57")
+        assertEquals(0.57, decimalDot!!, 0.01)
+    }
+
+    @Test
+    fun testExtractSampleDehghanPDF() {
+        val sampleText = """
+تاریخ: 1404/05/25
+شماره:
+نام حقیقی / حقوقی : اقای دهقان شماره تماس :
+ردیف شرح کالا عرض cm طول m تعداد فی عرض 60 cm فی عرض ساخته شده مبلغ کل
+1 صفحه عرض 60 60 4.67 1 95,000,000 95,000,000 443,650,000
+2 جزیره عرض 66 66 1.03 1 95,000,000 104,500,000 107,635,000
+3 سینک 35,000,000
+4 هزینه کرایه 40,000,000
+626,285,000
+کارشناس فروش مدیر فروش
+مشخصات خریدار
+جمع
+        """.trimIndent()
+
+        val lines = sampleText.split("\n")
+        val result = QuartzInvoiceExtractor.extractFromLines(lines, "نمونه دهقان")
+
+        assertEquals("1404/05/25", result.invoiceDate)
+        assertTrue("Buyer name should contain دهقان", result.buyerName.contains("دهقان"))
+        assertEquals(2, result.normalItems.size)
+        assertEquals(2, result.simpleItems.size)
+
+        // Item 1: صفحه عرض 60, width 60, length 4.67, price60: 95,000,000
+        val item1 = result.normalItems[0]
+        assertTrue(item1.description.contains("صفحه"))
+        assertEquals("60", item1.width)
+        assertEquals("4.67", item1.length)
+        assertEquals("95,000,000", item1.price60cm)
+
+        // Item 2: جزیره عرض 66, width 66, length 1.03, price60: 95,000,000
+        val item2 = result.normalItems[1]
+        assertTrue(item2.description.contains("جزیره"))
+        assertEquals("66", item2.width)
+        assertEquals("1.03", item2.length)
+        assertEquals("95,000,000", item2.price60cm)
+
+        // Simple items: سینک 35,000,000 and هزینه کرایه 40,000,000
+        assertTrue(result.simpleItems.any { it.description.contains("سینک") && it.totalAmountStr.contains("35,000,000") })
+        assertTrue(result.simpleItems.any { it.description.contains("کرایه") && it.totalAmountStr.contains("40,000,000") })
     }
 
     @Test
