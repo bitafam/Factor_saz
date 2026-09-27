@@ -167,6 +167,8 @@ fun AppNavigationRoot(viewModel: InvoiceViewModel) {
                     }
                 }
             }
+            // Persistent Import Dialog
+            InvoiceImportDialog(viewModel = viewModel)
         }
     }
 }
@@ -461,14 +463,19 @@ fun ActivationLockScreen(viewModel: InvoiceViewModel) {
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Written Developer Credit Logo
+            // Written Developer Credit Logo (tap to open Admin Panel)
             Text(
-                text = "توسعه دهنده امیرحسین سالاری",
+                text = "توسعه دهنده امیرحسین سالاری (پنل مدیریت)",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 4.dp)
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .clickable {
+                        viewModel.navigateTo("ADMIN_PANEL")
+                    }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
             )
         }
     }
@@ -825,6 +832,9 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
             TopAppBar(
                 title = { Text("صدور فاکتور سنگ کوارتز", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
                 actions = {
+                    IconButton(onClick = { viewModel.openImportDialog() }) {
+                        Icon(imageVector = Icons.Default.Share, contentDescription = "بازیابی و ایمپورت فاکتور (PDF / Excel)")
+                    }
                     IconButton(onClick = { viewModel.navigateTo("SETTINGS") }) {
                         Icon(imageVector = Icons.Default.Settings, contentDescription = "تنظیمات پیش‌فرض")
                     }
@@ -848,6 +858,68 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 item { Spacer(modifier = Modifier.height(8.dp)) }
+
+                // Quick Import Action Card
+                item {
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.openImportDialog() }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(MaterialTheme.colorScheme.primary),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Share,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onPrimary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "بازیابی و ورود فاکتور قدیمی (Excel / PDF)",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "استخراج ۱۰۰٪ دقیق بدون هوش مصنوعی از اکسل یا پی‌دی‌اف",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Button(
+                                onClick = { viewModel.openImportDialog() },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text("انتخاب فایل", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
 
                 // 0. Customizable Invoice Title and Subtitle Card
                 item {
@@ -2001,6 +2073,9 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { viewModel.openImportDialog() }) {
+                        Icon(imageVector = Icons.Default.Share, contentDescription = "بازیابی و ایمپورت فاکتور (PDF / Excel)")
+                    }
                     IconButton(onClick = { viewModel.triggerSyncAndLoadBackups(context) }) {
                         Icon(imageVector = Icons.Default.Refresh, contentDescription = "همگام‌سازی و بازیابی فاکتورها")
                     }

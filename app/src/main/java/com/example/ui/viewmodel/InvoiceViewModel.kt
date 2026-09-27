@@ -240,6 +240,88 @@ class InvoiceViewModel(
         Toast.makeText(context, "فاکتور جدید ایجاد شد", Toast.LENGTH_SHORT).show()
     }
 
+    // Import Dialog States
+    var isImportDialogOpen by mutableStateOf(false)
+    var pendingImportResult by mutableStateOf<com.example.util.importer.ParsedInvoiceResult?>(null)
+    var isImportingLoading by mutableStateOf(false)
+
+    fun openImportDialog() {
+        pendingImportResult = null
+        isImportDialogOpen = true
+    }
+
+    fun closeImportDialog() {
+        pendingImportResult = null
+        isImportDialogOpen = false
+    }
+
+    fun importFromUri(uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            isImportingLoading = true
+            try {
+                val result = com.example.util.importer.InvoiceImportManager.parseFromUri(context, uri)
+                launch(Dispatchers.Main) {
+                    pendingImportResult = result
+                    isImportingLoading = false
+                }
+            } catch (e: Exception) {
+                launch(Dispatchers.Main) {
+                    isImportingLoading = false
+                    Toast.makeText(context, "خطا در پردازش فایل: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun importFromText(text: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            isImportingLoading = true
+            try {
+                val result = com.example.util.importer.InvoiceImportManager.parseFromText(text)
+                launch(Dispatchers.Main) {
+                    pendingImportResult = result
+                    isImportingLoading = false
+                }
+            } catch (e: Exception) {
+                launch(Dispatchers.Main) {
+                    isImportingLoading = false
+                    Toast.makeText(context, "خطا در پردازش متن: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun applyParsedInvoice(parsed: com.example.util.importer.ParsedInvoiceResult) {
+        if (parsed.invoiceNo.isNotBlank()) invoiceNo = parsed.invoiceNo
+        if (parsed.invoiceDate.isNotBlank()) invoiceDate = parsed.invoiceDate
+        if (parsed.buyerName.isNotBlank()) buyerName = parsed.buyerName
+        if (parsed.sellerName.isNotBlank()) sellerName = parsed.sellerName
+        if (parsed.sellerPhone.isNotBlank()) sellerPhone = parsed.sellerPhone
+        if (parsed.sellerAddress.isNotBlank()) sellerAddress = parsed.sellerAddress
+        if (parsed.stoneCode.isNotBlank()) stoneCode = parsed.stoneCode
+        if (parsed.stoneType.isNotBlank()) stoneType = parsed.stoneType
+        if (parsed.invoiceTitle.isNotBlank()) invoiceTitle = parsed.invoiceTitle
+        if (parsed.invoiceSubtitle.isNotBlank()) invoiceSubtitle = parsed.invoiceSubtitle
+        if (parsed.managerSign.isNotBlank()) managerSign = parsed.managerSign
+        if (parsed.salesSign.isNotBlank()) salesSign = parsed.salesSign
+
+        if (parsed.normalItems.isNotEmpty()) {
+            normalItems.clear()
+            normalItems.addAll(parsed.normalItems)
+        }
+        if (parsed.simpleItems.isNotEmpty()) {
+            simpleItems.clear()
+            simpleItems.addAll(parsed.simpleItems)
+        }
+        if (parsed.percentageItems.isNotEmpty()) {
+            percentageItems.clear()
+            percentageItems.addAll(parsed.percentageItems)
+        }
+        closeImportDialog()
+        navigateTo("EDITOR")
+        Toast.makeText(context, "فاکتور با موفقیت (${parsed.totalItemsCount} ردیف) در فاکتورساز بارگذاری شد", Toast.LENGTH_LONG).show()
+    }
+
     // Update permanent default settings
     fun updateDefaultSettings(
         sName: String,
