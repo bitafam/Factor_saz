@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import android.net.Uri
@@ -2414,6 +2415,16 @@ fun AccountScreen(viewModel: InvoiceViewModel) {
 
     // Checking which ones are checked by default
     val selectedInvoicesMap = remember { mutableStateMapOf<Int, Boolean>() }
+    val availableBackups by viewModel.availableBackups.collectAsStateWithLifecycle()
+    var backupToRestoreConfirm by remember { mutableStateOf<com.example.util.BackupFileInfo?>(null) }
+
+    val backupPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            viewModel.restoreBackupFromUri(context, uri)
+        }
+    }
     
     // Sync checkboxes when periodInvoices changes
     LaunchedEffect(periodInvoices) {
@@ -2570,6 +2581,185 @@ fun AccountScreen(viewModel: InvoiceViewModel) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Default.Send, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3.5. Full Offline Backup & Restore Section (ذخیره و بازیابی کامل دیتای برنامه)
+            item {
+                Text(
+                    text = "پشتیبان‌گیری و بازیابی کل اطلاعات (آفلاین)",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            item {
+                Card(
+                    shape = RoundedCornerShape(14.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("مدیریت پشتیبان‌گیری آفلاین", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text("ذخیره تمام فاکتورها، تنظیمات سربرگ و امضاها در قالب فایل امن (.qzb)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+
+                        // Backup Action Buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.createAndShareFullBackup(context) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF10B981),
+                                    contentColor = Color.White
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f).height(46.dp)
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("ایجاد فایل پشتیبان کامل", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    backupPickerLauncher.launch(
+                                        arrayOf(
+                                            "*/*",
+                                            "application/json",
+                                            "application/octet-stream"
+                                        )
+                                    )
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f).height(46.dp)
+                            ) {
+                                Icon(Icons.Default.AddCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("بازیابی از فایل", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        // Available Backup Files on Device
+                        if (availableBackups.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "فایل‌های پشتیبان ذخیره‌شده روی گوشی:",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            availableBackups.take(5).forEach { backupInfo ->
+                                Card(
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Info,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    text = backupInfo.name,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1
+                                                )
+                                            }
+                                            Text(
+                                                text = "${backupInfo.invoiceCount} فاکتور",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "تاریخ: ${backupInfo.lastModifiedFormatted} | حجم: ${backupInfo.sizeFormatted}",
+                                                fontSize = 10.sp,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+
+                                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Button(
+                                                    onClick = { backupToRestoreConfirm = backupInfo },
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                    modifier = Modifier.height(28.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(12.dp))
+                                                    Spacer(modifier = Modifier.width(3.dp))
+                                                    Text("بازیابی", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                }
+
+                                                IconButton(
+                                                    onClick = { viewModel.startShareIntent(context, backupInfo.file) },
+                                                    modifier = Modifier.size(28.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Share, contentDescription = "اشتراک", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                                                }
+
+                                                IconButton(
+                                                    onClick = { viewModel.deleteBackupFile(backupInfo.file) },
+                                                    modifier = Modifier.size(28.dp)
+                                                ) {
+                                                    Icon(Icons.Default.Delete, contentDescription = "حذف", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -2854,6 +3044,76 @@ fun AccountScreen(viewModel: InvoiceViewModel) {
             }
 
             item { Spacer(modifier = Modifier.height(30.dp)) }
+        }
+
+        // 1. Confirm Restore Dialog
+        backupToRestoreConfirm?.let { bInfo ->
+            AlertDialog(
+                onDismissRequest = { backupToRestoreConfirm = null },
+                icon = { Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+                title = { Text("تأیید بازیابی اطلاعات", fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        text = "آیا مطمئن هستید که می‌خواهید فایل «${bInfo.name}» شامل ${bInfo.invoiceCount} فاکتور و اطلاعات فروشگاه را بازیابی کنید؟\n\nاین اطلاعات به پایگاه داده برنامه اضافه و اطلاعات سربرگ جای‌گذاری خواهند شد.",
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val fileToRestore = bInfo.file
+                            backupToRestoreConfirm = null
+                            viewModel.restoreBackupFromFile(context, fileToRestore)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text("بله، بازیابی شود", fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { backupToRestoreConfirm = null }) {
+                        Text("انصراف")
+                    }
+                }
+            )
+        }
+
+        // 2. Loading State Dialog
+        if (viewModel.isBackupOperationLoading) {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("در حال پردازش...", fontWeight = FontWeight.Bold) },
+                text = {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Text("لطفاً شکیبا باشید، در حال انجام عملیات پشتیبان‌گیری / بازیابی...", fontSize = 12.sp)
+                    }
+                },
+                confirmButton = {}
+            )
+        }
+
+        // 3. Result / Info Dialog
+        viewModel.backupOperationMessage?.let { msg ->
+            AlertDialog(
+                onDismissRequest = { viewModel.backupOperationMessage = null },
+                icon = { Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981)) },
+                title = { Text("عملیات پشتیبان‌گیری / بازیابی", fontWeight = FontWeight.Bold) },
+                text = { Text(text = msg, fontSize = 12.sp, lineHeight = 20.sp) },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.backupOperationMessage = null },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Text("متوجه شدم", fontWeight = FontWeight.Bold)
+                    }
+                }
+            )
         }
     }
 }
@@ -3184,6 +3444,53 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("ذخیره نهایی تنظیمات پیش‌فرض", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // Quick Backup & Restore Card
+            item {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Share, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("پشتیبان‌گیری آفلاین از کل اطلاعات", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Text(
+                            "برای ایجاد فایل پشتیبان کامل یا بازیابی دیتای ذخیره‌شده، به بخش پشتیبان‌گیری در پیشخوان کاربری مراجعه نمایید:",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.createAndShareFullBackup(context) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981), contentColor = Color.White),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).height(38.dp)
+                            ) {
+                                Text("ایجاد فایل بکاپ (.qzb)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = { viewModel.navigateTo("ACCOUNT") },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).height(38.dp)
+                            ) {
+                                Text("مدیریت بکاپ‌ها", fontSize = 11.sp)
+                            }
+                        }
+                    }
                 }
             }
 

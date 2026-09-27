@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import com.example.util.InvoiceBackupManager
 import java.text.SimpleDateFormat
@@ -113,7 +114,14 @@ class InvoiceViewModel(
     var adminTargetUserName by mutableStateOf("")
     var adminCalculatedKey by mutableStateOf("")
 
+    // Full Offline Backup & Restore States
+    var isBackupOperationLoading by mutableStateOf(false)
+    var backupOperationMessage by mutableStateOf<String?>(null)
+    private val _availableBackups = MutableStateFlow<List<com.example.util.BackupFileInfo>>(emptyList())
+    val availableBackups: StateFlow<List<com.example.util.BackupFileInfo>> = _availableBackups.asStateFlow()
+
     init {
+        refreshAvailableBackups()
         // Prepare database Configuration and check device ID on startup
         viewModelScope.launch {
             val direct = repository.getConfigDirect()
@@ -793,16 +801,21 @@ class InvoiceViewModel(
         pendingShareInvoice = null
     }
 
-    private fun startShareIntent(context: Context, file: java.io.File) {
+    fun startShareIntent(context: Context, file: java.io.File, customTitle: String = "اشتراک‌گذاری فایل") {
         try {
             val authority = "${context.packageName}.fileprovider"
             val uri = androidx.core.content.FileProvider.getUriForFile(context, authority, file)
+            val mimeType = when {
+                file.name.endsWith(".pdf") -> "application/pdf"
+                file.name.endsWith(".qzb") || file.name.endsWith(".json") -> "application/octet-stream"
+                else -> "*/*"
+            }
             val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = "application/pdf"
+                type = mimeType
                 putExtra(android.content.Intent.EXTRA_STREAM, uri)
                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(android.content.Intent.createChooser(intent, "اشتراک‌گذاری فاکتور پی‌دی‌اف"))
+            context.startActivity(android.content.Intent.createChooser(intent, customTitle))
         } catch (e: Exception) {
             Toast.makeText(context, "خطا در اشتراک‌گذاری فایل: ${e.message}", Toast.LENGTH_SHORT).show()
         }
@@ -911,6 +924,177 @@ class InvoiceViewModel(
         } catch (e: Exception) {
             e.printStackTrace()
             onComplete(null)
+        }
+    }
+
+    fun refreshAvailableBackups() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val list = InvoiceBackupManager.listAvailableBackups()
+            _availableBackups.value = list
+        }
+    }
+
+    /**
+     * Creates a full offline backup package of all invoices, configuration, and registered coworker licenses,
+     * saves it in the device public storage, and opens the Android share sheet.
+     */
+    fun createAndShareFullBackup(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            isBackupOperationLoading = true
+            try {
+                val invoices = repository.getAllInvoicesDirect()
+                val config = repository.getConfigDirect()
+                val devices = repository.getAllDevicesDirect()
+
+                val backupFile = InvoiceBackupManager.saveFullBackupToFile(invoices, config, devices)
+                refreshAvailableBackups()
+
+                launch(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    if (backupFile != null && backupFile.exists()) {
+                        backupOperationMessage = "بکاپ کامل از ${invoices.size} فاکتور و اطلاعات فروشگاه با موفقیت ایجاد گردید.\n\nمسیر ذخیره:\n${backupFile.absolutePath}"
+                        Toast.makeText(context, "بکاپ کامل (${invoices.size} فاکتور) ایجاد شد", Toast.LENGTH_SHORT).show()
+                        startShareIntent(context, backupFile)
+                    } else {
+                        Toast.makeText(context, "خطا در ایجاد فایل بکاپ", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                launch(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    Toast.makeText(context, "خطا در تولید فایل پشتیبان: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * Restores full backup from a user-selected SAF Uri (file picker).
+     */
+    fun restoreBackupFromUri(context: Context, uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            isBackupOperationLoading = true
+            try {
+                val jsonContent = InvoiceBackupManager.readFromUri(context, uri)
+                if (jsonContent.isNullOrBlank()) {
+                    launch(Dispatchers.Main) {
+                        isBackupOperationLoading = false
+                        Toast.makeText(context, "خطا در خواندن فایل بکاپ انتخاب‌شده", Toast.LENGTH_LONG).show()
+                    }
+                    return@launch
+                }
+
+                val result = InvoiceBackupManager.parseBackupContent(jsonContent)
+                applyRestoreResult(context, result)
+            } catch (e: Exception) {
+                launch(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    Toast.makeText(context, "خطا در بازگردانی بکاپ: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * Restores full backup directly from a local File.
+     */
+    fun restoreBackupFromFile(context: Context, file: java.io.File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            isBackupOperationLoading = true
+            try {
+                val jsonContent = InvoiceBackupManager.readFromFile(file)
+                if (jsonContent.isNullOrBlank()) {
+                    launch(Dispatchers.Main) {
+                        isBackupOperationLoading = false
+                        Toast.makeText(context, "خطا در خواندن فایل بکاپ", Toast.LENGTH_LONG).show()
+                    }
+                    return@launch
+                }
+
+                val result = InvoiceBackupManager.parseBackupContent(jsonContent)
+                applyRestoreResult(context, result)
+            } catch (e: Exception) {
+                launch(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    Toast.makeText(context, "خطا در بازگردانی فایل: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private suspend fun applyRestoreResult(context: Context, result: com.example.util.BackupRestoreResult) {
+        if (!result.success) {
+            withContext(Dispatchers.Main) {
+                isBackupOperationLoading = false
+                Toast.makeText(context, result.errorMessage ?: "فایل بکاپ نامعتبر است", Toast.LENGTH_LONG).show()
+            }
+            return
+        }
+
+        var importedInvoicesCount = 0
+        for (inv in result.invoices) {
+            repository.insertInvoice(inv)
+            // Re-sync backup file locally
+            InvoiceBackupManager.saveInvoiceBackup(inv)
+            importedInvoicesCount++
+        }
+
+        if (result.config != null) {
+            val currentConfig = repository.getConfigDirect() ?: ConfigEntity(deviceId = LicenseManager.getDeviceId(context))
+            val mergedConfig = currentConfig.copy(
+                defaultSellerName = result.config.defaultSellerName,
+                defaultSellerPhone = result.config.defaultSellerPhone,
+                defaultSellerAddress = result.config.defaultSellerAddress,
+                defaultInvoiceTitle = result.config.defaultInvoiceTitle,
+                defaultInvoiceSubtitle = result.config.defaultInvoiceSubtitle,
+                defaultManagerSign = result.config.defaultManagerSign,
+                defaultSalesSign = result.config.defaultSalesSign,
+                defaultManagerSignImg = result.config.defaultManagerSignImg,
+                defaultSalesSignImg = result.config.defaultSalesSignImg
+            )
+            repository.saveConfig(mergedConfig)
+            withContext(Dispatchers.Main) {
+                sellerName = mergedConfig.defaultSellerName
+                sellerPhone = mergedConfig.defaultSellerPhone
+                sellerAddress = mergedConfig.defaultSellerAddress
+                invoiceTitle = mergedConfig.defaultInvoiceTitle
+                invoiceSubtitle = mergedConfig.defaultInvoiceSubtitle
+                managerSign = mergedConfig.defaultManagerSign
+                salesSign = mergedConfig.defaultSalesSign
+                managerSignImgBase64 = mergedConfig.defaultManagerSignImg
+                salesSignImgBase64 = mergedConfig.defaultSalesSignImg
+            }
+        }
+
+        for (dev in result.devices) {
+            repository.saveDevice(dev)
+        }
+        if (result.devices.isNotEmpty()) {
+            val updatedDevices = repository.getAllDevicesDirect()
+            InvoiceBackupManager.saveLicensesBackup(updatedDevices)
+        }
+
+        refreshAvailableBackups()
+
+        withContext(Dispatchers.Main) {
+            isBackupOperationLoading = false
+            val configMsg = if (result.configRestored) " و مشخصات و امضاهای فروشگاه" else ""
+            val licenseMsg = if (result.devicesCount > 0) " و ${result.devicesCount} لایسنس همکاران" else ""
+            backupOperationMessage = "بازیابی با موفقیت کامل انجام شد:\n• $importedInvoicesCount فاکتور بازیابی گردید.\n$configMsg$licenseMsg"
+            Toast.makeText(context, "✅ بازیابی موفقیت‌آمیز بود ($importedInvoicesCount فاکتور)", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun deleteBackupFile(file: java.io.File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (file.exists()) {
+                    file.delete()
+                }
+                refreshAvailableBackups()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 

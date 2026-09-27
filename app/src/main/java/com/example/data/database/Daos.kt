@@ -8,6 +8,9 @@ interface InvoiceDao {
     @Query("SELECT * FROM invoices WHERE isDeleted = 0 ORDER BY createdAt DESC")
     fun getAllInvoices(): Flow<List<InvoiceEntity>>
 
+    @Query("SELECT * FROM invoices ORDER BY createdAt DESC")
+    suspend fun getAllInvoicesDirect(): List<InvoiceEntity>
+
     @Query("SELECT * FROM invoices WHERE isDeleted = 1 ORDER BY createdAt DESC")
     fun getDeletedInvoices(): Flow<List<InvoiceEntity>>
 
