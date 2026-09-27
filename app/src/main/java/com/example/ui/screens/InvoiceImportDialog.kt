@@ -380,12 +380,32 @@ private fun PreviewExtractedInvoiceView(
                         Text("سنگ: ${result.stoneType} ${result.stoneCode}".trim(), fontSize = 11.sp, color = MaterialTheme.colorScheme.secondary)
                     }
                 }
-                
-                Text(
-                    text = "🔒 تنظیمات پیش‌فرض فروشنده، عنوان و امضاها بدون تغییر حفظ خواهند شد.",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
-                )
+
+                // Info banner indicating defaults protection
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF10B981),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "مشخصات پیش‌فرض فروشگاه شما (فروشنده، شماره تماس، آدرس و امضاها) بدون تغییر باقی می‌مانند.",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),

@@ -292,23 +292,36 @@ class InvoiceViewModel(
     }
 
     fun applyParsedInvoice(parsed: com.example.util.importer.ParsedInvoiceResult) {
-        // Only update non-default per-invoice fields to protect user's configured default settings
+        // Only apply invoice-specific transaction data (items, buyer, stone, date, invoice number)
         if (parsed.invoiceNo.isNotBlank()) invoiceNo = parsed.invoiceNo
         if (parsed.invoiceDate.isNotBlank()) invoiceDate = parsed.invoiceDate
         if (parsed.buyerName.isNotBlank()) buyerName = parsed.buyerName
         if (parsed.stoneCode.isNotBlank()) stoneCode = parsed.stoneCode
         if (parsed.stoneType.isNotBlank()) stoneType = parsed.stoneType
 
-        // Update items lists
-        if (parsed.normalItems.isNotEmpty() || parsed.simpleItems.isNotEmpty()) {
+        // Strictly keep and reinforce the user's configured default store & seller settings
+        viewModelScope.launch {
+            val direct = repository.getConfigDirect()
+            if (direct != null) {
+                if (direct.defaultSellerName.isNotBlank()) sellerName = direct.defaultSellerName
+                if (direct.defaultSellerPhone.isNotBlank()) sellerPhone = direct.defaultSellerPhone
+                if (direct.defaultSellerAddress.isNotBlank()) sellerAddress = direct.defaultSellerAddress
+                if (direct.defaultInvoiceTitle.isNotBlank()) invoiceTitle = direct.defaultInvoiceTitle
+                if (direct.defaultInvoiceSubtitle.isNotBlank()) invoiceSubtitle = direct.defaultInvoiceSubtitle
+                if (direct.defaultManagerSign.isNotBlank()) managerSign = direct.defaultManagerSign
+                if (direct.defaultSalesSign.isNotBlank()) salesSign = direct.defaultSalesSign
+                if (direct.defaultManagerSignImg.isNotBlank()) managerSignImgBase64 = direct.defaultManagerSignImg
+                if (direct.defaultSalesSignImg.isNotBlank()) salesSignImgBase64 = direct.defaultSalesSignImg
+            }
+        }
+
+        if (parsed.normalItems.isNotEmpty()) {
             normalItems.clear()
-            if (parsed.normalItems.isNotEmpty()) {
-                normalItems.addAll(parsed.normalItems)
-            }
+            normalItems.addAll(parsed.normalItems)
+        }
+        if (parsed.simpleItems.isNotEmpty()) {
             simpleItems.clear()
-            if (parsed.simpleItems.isNotEmpty()) {
-                simpleItems.addAll(parsed.simpleItems)
-            }
+            simpleItems.addAll(parsed.simpleItems)
         }
         if (parsed.percentageItems.isNotEmpty()) {
             percentageItems.clear()
@@ -316,7 +329,7 @@ class InvoiceViewModel(
         }
         closeImportDialog()
         navigateTo("EDITOR")
-        Toast.makeText(context, "فاکتور با موفقیت (${parsed.totalItemsCount} ردیف) در فاکتورساز بارگذاری شد (اطلاعات پیش‌فرض حفظ شد)", Toast.LENGTH_LONG).show()
+        Toast.makeText(context, "فاکتور با موفقیت (${parsed.totalItemsCount} ردیف) بدون تغییر اطلاعات پیش‌فرض شما بارگذاری شد", Toast.LENGTH_LONG).show()
     }
 
     // Update permanent default settings
