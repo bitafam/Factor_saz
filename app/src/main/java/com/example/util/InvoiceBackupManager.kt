@@ -495,25 +495,157 @@ object InvoiceBackupManager {
     }
 
     /**
-     * Reads all invoice backup (.qzb) files from external directory.
+     * Returns all potential candidate folders where backup factors might be stored.
+     */
+    fun getAllCandidateBackupFolders(): List<File> {
+        val folders = mutableListOf<File>()
+        val docDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val extRoot = Environment.getExternalStorageDirectory()
+
+        val candidateNames = listOf(
+            "IranQuartz/Backup faktors",
+            "Iranquartz/backupfactors",
+            "IranQuartz/backup factors",
+            "IranQuartz/Backup factors",
+            "Iranquartz/Backup faktors",
+            "Iranquartz/backup factors",
+            "IranQuartz/faktors",
+            "Iranquartz/faktors",
+            "IranQuartz",
+            "Iranquartz",
+            "Backup faktors",
+            "backupfactors",
+            "backup factors"
+        )
+
+        for (name in candidateNames) {
+            folders.add(File(docDir, name))
+            folders.add(File(downloadDir, name))
+            folders.add(File(extRoot, "Documents/$name"))
+            folders.add(File(extRoot, name))
+        }
+
+        // Add standard root folders
+        folders.add(getBackupFolder())
+        folders.add(getAppPublicRoot())
+
+        return folders.distinctBy { it.absolutePath }
+    }
+
+    /**
+     * Reads all invoice backup (.qzb and .json) files from all candidate external directories recursively.
      */
     fun loadAllBackups(): List<InvoiceEntity> {
         val list = mutableListOf<InvoiceEntity>()
+        val seenIdsOrNames = mutableSetOf<String>()
+
         try {
-            val folder = getBackupFolder()
-            val files = folder.listFiles { _, name -> name.endsWith(".qzb") && !name.contains("بکاپ_کامل") } ?: emptyArray()
-            for (file in files) {
-                try {
-                    val bytes = FileInputStream(file).use { input -> input.readBytes() }
-                    val json = String(bytes, Charsets.UTF_8)
-                    val invoice = deserializeInvoice(json)
-                    list.add(invoice)
-                } catch (e: Exception) {
-                    e.printStackTrace()
+            val candidateFolders = getAllCandidateBackupFolders()
+            for (folder in candidateFolders) {
+                if (!folder.exists() || !folder.isDirectory) continue
+                val files = folder.listFiles { _, name ->
+                    name.endsWith(".qzb", ignoreCase = true) || name.endsWith(".json", ignoreCase = true)
+                } ?: emptyArray()
+
+                for (file in files) {
+                    try {
+                        val bytes = FileInputStream(file).use { input -> input.readBytes() }
+                        val json = String(bytes, Charsets.UTF_8)
+                        val parseResult = parseBackupContent(json)
+                        if (parseResult.success) {
+                            for (inv in parseResult.invoices) {
+                                val uniqueKey = "${inv.invoiceNo}_${inv.buyerName}_${inv.invoiceDate}"
+                                if (uniqueKey.isNotBlank() && seenIdsOrNames.add(uniqueKey)) {
+                                    list.add(inv)
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+        return list
+    }
+
+    /**
+     * Recursively traverses a DocumentFile tree (SAF directory picker) and restores all .qzb / .json invoices.
+     */
+    fun restoreFromTreeUri(context: Context, treeUri: Uri): List<InvoiceEntity> {
+        val list = mutableListOf<InvoiceEntity>()
+        val seenKeys = mutableSetOf<String>()
+        try {
+            val rootDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+            if (rootDoc != null && rootDoc.isDirectory) {
+                traverseAndCollectInvoices(context, rootDoc, list, seenKeys)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
+    }
+
+    private fun traverseAndCollectInvoices(
+        context: Context,
+        dir: androidx.documentfile.provider.DocumentFile,
+        outList: MutableList<InvoiceEntity>,
+        seenKeys: MutableSet<String>
+    ) {
+        val files = dir.listFiles()
+        for (f in files) {
+            if (f.isDirectory) {
+                traverseAndCollectInvoices(context, f, outList, seenKeys)
+            } else if (f.isFile) {
+                val name = f.name ?: ""
+                if (name.endsWith(".qzb", ignoreCase = true) || name.endsWith(".json", ignoreCase = true)) {
+                    try {
+                        context.contentResolver.openInputStream(f.uri)?.use { stream ->
+                            val json = BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
+                            val res = parseBackupContent(json)
+                            if (res.success) {
+                                for (inv in res.invoices) {
+                                    val key = "${inv.invoiceNo}_${inv.buyerName}_${inv.invoiceDate}"
+                                    if (key.isNotBlank() && seenKeys.add(key)) {
+                                        outList.add(inv)
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Reads invoices from a list of user-picked Document Uris.
+     */
+    fun restoreFromMultipleUris(context: Context, uris: List<Uri>): List<InvoiceEntity> {
+        val list = mutableListOf<InvoiceEntity>()
+        val seenKeys = mutableSetOf<String>()
+        for (uri in uris) {
+            try {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val json = BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
+                    val res = parseBackupContent(json)
+                    if (res.success) {
+                        for (inv in res.invoices) {
+                            val key = "${inv.invoiceNo}_${inv.buyerName}_${inv.invoiceDate}"
+                            if (key.isNotBlank() && seenKeys.add(key)) {
+                                list.add(inv)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
         return list
     }

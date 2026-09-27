@@ -2051,6 +2051,22 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
     val savedList by viewModel.savedInvoices.collectAsStateWithLifecycle()
     var searchQuery by remember { mutableStateOf("") }
 
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri: Uri? ->
+        if (treeUri != null) {
+            viewModel.restoreFromFolderTree(context, treeUri)
+        }
+    }
+
+    val multiFilePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.restoreFromMultipleUris(context, uris)
+        }
+    }
+
     val filteredList = remember(savedList, searchQuery) {
         if (searchQuery.isBlank()) {
             savedList
@@ -2074,6 +2090,9 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { folderPickerLauncher.launch(null) }) {
+                        Icon(imageVector = Icons.Default.Add, contentDescription = "انتخاب پوشه Backup faktors")
+                    }
                     IconButton(onClick = { viewModel.openImportDialog() }) {
                         Icon(imageVector = Icons.Default.Share, contentDescription = "بازیابی و ایمپورت فاکتور (PDF / Excel)")
                     }
@@ -2097,6 +2116,61 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                 .padding(p)
                 .background(MaterialTheme.colorScheme.background)
         ) {
+            // Restore Action Card at the top of History screen
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("بازیابی فاکتورهای .qzb از حافظه گوشی", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Text("${savedList.size} فاکتور فعال", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { viewModel.triggerSyncAndLoadBackups(context) },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1.2f).height(38.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("همگام‌سازی خودکار", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Button(
+                            onClick = { folderPickerLauncher.launch(null) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981), contentColor = Color.White),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1.3f).height(38.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("انتخاب پوشه فاکتورها", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
             // Search Input Block
             OutlinedTextField(
                 value = searchQuery,
@@ -2114,7 +2188,7 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
             )
 
             if (filteredList.isEmpty()) {
@@ -2122,7 +2196,7 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                     modifier = Modifier
                         .fillMaxSize()
                         .weight(1f)
-                        .padding(24.dp),
+                        .padding(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -2130,34 +2204,52 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                         imageVector = Icons.Default.List,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(72.dp)
+                        modifier = Modifier.size(64.dp)
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
                     Text(
-                        if (searchQuery.isNotBlank()) "هیچ فاکتوری با مشخصات جستجو شده یافت نشد." else "هیچ فاکتوری یافت نشد.",
+                        if (searchQuery.isNotBlank()) "هیچ فاکتوری با مشخصات جستجو شده یافت نشد." else "لیست فاکتورها خالی است.",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (searchQuery.isBlank()) {
                         Text(
-                            "با زدن دکمه ذخیره در صفحه اصلی، فاکتورها را نگهداری کنید.",
+                            "اگر فاکتورهای قبلی در پوشه Documents/IranQuartz/Backup faktors گوشی شما قرار دارند، دکمه‌های زیر را لمس نمایید تا فوراً به این لیست اضافه شوند:",
                             fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
                             textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp)
+                            lineHeight = 18.sp,
+                            modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp)
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        Button(
-                            onClick = { viewModel.triggerSyncAndLoadBackups(context) },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                            shape = RoundedCornerShape(10.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(0.9f),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(imageVector = Icons.Default.Refresh, contentDescription = null)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("بازیابی فوری فاکتورها از فایل‌های پشتیبان (.qzb)", fontSize = 12.sp)
+                            Button(
+                                onClick = { viewModel.triggerSyncAndLoadBackups(context) },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f).height(44.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("پویش خودکار پوشه‌ها", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = { folderPickerLauncher.launch(null) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981), contentColor = Color.White),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.weight(1f).height(44.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("انتخاب پوشه فاکتورها", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -2180,6 +2272,43 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                 }
             }
         }
+    }
+
+    // Loading Dialog
+    if (viewModel.isBackupOperationLoading) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("در حال بازیابی فاکتورها...", fontWeight = FontWeight.Bold) },
+            text = {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    Text("لطفاً شکیبا باشید، در حال خواندن فایل‌های .qzb و ثبت در دیتابیس...", fontSize = 12.sp)
+                }
+            },
+            confirmButton = {}
+        )
+    }
+
+    // Result Dialog
+    viewModel.backupOperationMessage?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { viewModel.backupOperationMessage = null },
+            icon = { Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF10B981)) },
+            title = { Text("نتیجه بازیابی فاکتورها", fontWeight = FontWeight.Bold) },
+            text = { Text(text = msg, fontSize = 12.sp, lineHeight = 20.sp) },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.backupOperationMessage = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("متوجه شدم", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
     }
 
     if (viewModel.showShareConfirmDialog) {

@@ -3,11 +3,15 @@ package com.example.util.importer
 import com.example.data.model.ComposeInvoiceItem
 import com.example.data.model.ComposeSimpleItem
 import java.text.DecimalFormat
+import kotlin.math.roundToInt
 
 object QuartzInvoiceExtractor {
 
     private val moneyFormatter = DecimalFormat("#,###")
 
+    /**
+     * Extracts invoice data from a 2D matrix of cells (Excel / CSV).
+     */
     fun extractFromMatrix(matrix: List<List<String>>, sourceName: String = "Excel"): ParsedInvoiceResult {
         var invoiceDate = ""
         var invoiceNo = ""
@@ -33,27 +37,29 @@ object QuartzInvoiceExtractor {
         var colLength = -1
         var colP60 = -1
         var colTotal = -1
+        var colQty = -1
 
         // 1. Scan for header row
         for (r in matrix.indices) {
             val row = matrix[r]
             val rowText = row.joinToString(" ") { TextNormalizer.cleanText(it) }
 
-            if (rowText.contains("شرح") && (rowText.contains("عرض") || rowText.contains("طول") || rowText.contains("فی"))) {
+            if (rowText.contains("شرح") || (rowText.contains("عرض") && (rowText.contains("طول") || rowText.contains("فی")))) {
                 tableHeaderRowIndex = r
                 for (c in row.indices) {
                     val cell = TextNormalizer.cleanText(row[c])
-                    if (cell.contains("شرح")) colDesc = c
-                    else if (cell.contains("عرض") && (cell.contains("cm") || cell == "عرض" || cell.contains("سانت"))) colWidth = c
-                    else if (cell.contains("طول")) colLength = c
-                    else if (cell.contains("۶۰") || cell.contains("60")) colP60 = c
-                    else if (cell.contains("مبلغ کل") || cell == "مبلغ" || cell.contains("کل")) colTotal = c
+                    if (cell.contains("شرح") || cell.contains("کالا") || cell.contains("توضیحات")) colDesc = c
+                    else if (cell.contains("عرض") || cell.contains("cm") || cell.contains("سانت")) colWidth = c
+                    else if (cell.contains("طول") || cell.contains("مترطول") || cell == "طول") colLength = c
+                    else if (cell.contains("۶۰") || cell.contains("60") || cell.contains("فی") || cell.contains("واحد")) colP60 = c
+                    else if (cell.contains("مبلغ کل") || cell == "مبلغ" || cell.contains("جمع کل") || cell.contains("قیمت کل")) colTotal = c
+                    else if (cell.contains("تعداد") || cell.contains("مقدار")) colQty = c
                 }
                 break
             }
         }
 
-        // 2. Extract metadata from non-table rows
+        // 2. Extract metadata from all rows
         for (r in matrix.indices) {
             val row = matrix[r]
             for (c in row.indices) {
@@ -67,17 +73,16 @@ object QuartzInvoiceExtractor {
                 }
 
                 // Invoice No
-                if (cell.contains("شماره:") || cell.contains("شماره فاکتور")) {
-                    val after = cell.substringAfter(":")
-                        .ifBlank { if (c + 1 < row.size) row[c + 1] else "" }
-                    val cleanNo = TextNormalizer.cleanText(after)
+                if (cell.contains("شماره:") || cell.contains("شماره فاکتور") || cell.contains("شماره سند")) {
+                    val candidate = if (cell.contains(":")) cell.substringAfter(":") else if (c + 1 < row.size) row[c + 1] else ""
+                    val cleanNo = TextNormalizer.cleanText(candidate).trim()
                     if (cleanNo.isNotBlank() && invoiceNo.isBlank()) {
                         invoiceNo = cleanNo
                     }
                 }
 
-                // Buyer
-                if (cell.contains("خریدار") || cell.contains("نام حقیقی :") || cell.contains("نام خریدار")) {
+                // Buyer Name
+                if (cell.contains("خریدار") || cell.contains("نام حقیقی :") || cell.contains("نام خریدار") || cell.contains("طرف حساب")) {
                     val candidate = if (cell.contains(":")) cell.substringAfter(":") else if (c + 1 < row.size) row[c + 1] else ""
                     val cleanB = TextNormalizer.cleanText(candidate).replace("مشخصات", "").trim()
                     if (cleanB.isNotBlank() && buyerName.isBlank() && !cleanB.contains("شماره")) {
@@ -85,39 +90,16 @@ object QuartzInvoiceExtractor {
                     }
                 }
 
-                // Seller
-                if (cell.contains("فروشنده") || cell.contains("کایند استون") || cell.contains("کانتر استون")) {
-                    if (cell.contains("کایند استون") || cell.contains("کانتر استون") || cell.contains("توتم")) {
-                        if (sellerName.isBlank()) sellerName = cell
-                    }
+                // Stone Code & Type
+                if (cell.contains("کد سنگ:") || cell.contains("کد طرح:")) {
+                    stoneCode = cell.substringAfter(":").trim()
                 }
-                if (cell.contains("نام حقیقی/حقوقی :") && cell.contains("استون")) {
-                    sellerName = cell.substringAfter(":").trim()
+                if (cell.contains("نوع سنگ:") || cell.contains("نوع متریال:")) {
+                    stoneType = cell.substringAfter(":").trim()
                 }
-
-                // Phone
-                if (cell.contains("تلفن") || cell.contains("شماره تماس")) {
-                    val candidate = if (cell.contains(":")) cell.substringAfter(":") else if (c + 1 < row.size) row[c + 1] else ""
-                    val p = TextNormalizer.toEnglishDigits(candidate).trim()
-                    if (p.isNotBlank() && p != "0" && sellerPhone.isBlank()) {
-                        sellerPhone = p
-                    }
-                }
-
-                // Titles
-                if ((cell.contains("توتم") || cell.contains("کوارتز") || cell.contains("کانتر استون")) && invoiceTitle.isBlank()) {
-                    invoiceTitle = cell
-                }
-                if (cell.contains("صفحات کابینت") && invoiceSubtitle.isBlank()) {
-                    invoiceSubtitle = cell
-                }
-
-                // Stone Specs
-                if (cell.contains("کد سنگ:")) stoneCode = cell.substringAfter(":").trim()
-                if (cell.contains("نوع سنگ:")) stoneType = cell.substringAfter(":").trim()
 
                 // Total
-                if (cell.contains("جمع") || cell.contains("جمع کل")) {
+                if (cell.contains("جمع کل") || cell == "جمع") {
                     val num = TextNormalizer.parseNumber(cell)
                     if (num != null && num > 1000) {
                         detectedTotal = num
@@ -129,13 +111,15 @@ object QuartzInvoiceExtractor {
             }
         }
 
-        // 3. Process Table Rows
+        // 3. Process Table Rows (without dropping rows)
         val startRow = if (tableHeaderRowIndex >= 0) tableHeaderRowIndex + 1 else 0
         for (r in startRow until matrix.size) {
             val row = matrix[r]
             val rowText = row.joinToString(" ") { it.trim() }
             if (rowText.isBlank()) continue
-            if (rowText.contains("جمع") || rowText.contains("کارشناس") || rowText.contains("مدیر فروش")) {
+
+            // Skip pure summary rows (grand totals, signatures)
+            if (rowText.startsWith("جمع کل") || rowText.contains("مدیر فروش:") || rowText.contains("کارشناس فروش:")) {
                 val num = TextNormalizer.parseNumber(rowText)
                 if (num != null && num > 1000 && detectedTotal == null) {
                     detectedTotal = num
@@ -144,39 +128,50 @@ object QuartzInvoiceExtractor {
             }
 
             // Extract cells based on detected columns or fallback heuristics
-            val desc = (if (colDesc in row.indices) row[colDesc] else "").trim()
+            val rawDesc = (if (colDesc in row.indices) row[colDesc] else "").trim()
             val wStr = (if (colWidth in row.indices) row[colWidth] else "").trim()
             val lStr = (if (colLength in row.indices) row[colLength] else "").trim()
             val p60Str = (if (colP60 in row.indices) row[colP60] else "").trim()
             val totStr = (if (colTotal in row.indices) row[colTotal] else "").trim()
+            val qtyStr = (if (colQty in row.indices) row[colQty] else "").trim()
 
             val wNum = TextNormalizer.parseNumber(wStr)
             val lNum = TextNormalizer.parseNumber(lStr)
             val p60Num = TextNormalizer.parseNumber(p60Str)
             val totNum = TextNormalizer.parseNumber(totStr)
 
-            // If we have valid width and length, it's a dimensional item
-            if (wNum != null && wNum > 0 && lNum != null && lNum > 0) {
-                val p60Formatted = if (p60Num != null && p60Num > 0) moneyFormatter.format(p60Num.toLong()) else ""
+            // Remove leading row numbers from description
+            val cleanDesc = cleanRowDescription(rawDesc.ifBlank { row.firstOrNull { it.isNotBlank() } ?: "" })
+
+            // Check if we have width & length from column indices
+            if (wNum != null && lNum != null && (wNum > 0 || lNum > 0)) {
+                val standardizedWidth = standardizeWidth(wNum)
+                val standardizedLength = standardizeLength(lNum)
+                val p60Formatted = formatPrice(p60Num ?: totNum)
+
                 normalItems.add(
                     ComposeInvoiceItem(
-                        description = TextNormalizer.cleanText(desc),
-                        width = wNum.toInt().toString(),
-                        length = if (lNum % 1.0 == 0.0) lNum.toInt().toString() else lNum.toString(),
+                        description = cleanDesc.ifBlank { "ردیف سنگی ${normalItems.size + 1}" },
+                        width = standardizedWidth,
+                        length = standardizedLength,
                         price60cm = p60Formatted
                     )
                 )
-            } else if (desc.isNotBlank()) {
-                // Service item (e.g. سینک زیرکار, سینک کفتراش, کرایه)
-                val amount = totNum ?: p60Num ?: 0.0
-                if (amount > 0 || isServiceKeyword(desc)) {
-                    val qtyMatch = Regex("""(\d+)\s*عدد""").find(TextNormalizer.toEnglishDigits(desc))
-                    val qty = qtyMatch?.groupValues?.get(1) ?: "1"
+            } else {
+                // Try fallback line parsing across entire row cells
+                val parsedRow = parseRowHeuristically(row)
+                if (parsedRow is ComposeInvoiceItem) {
+                    normalItems.add(parsedRow)
+                } else if (parsedRow is ComposeSimpleItem) {
+                    simpleItems.add(parsedRow)
+                } else if (cleanDesc.isNotBlank()) {
+                    // Fallback: don't lose the row! Add as simple item or normal item
+                    val amount = totNum ?: p60Num ?: 0.0
                     simpleItems.add(
                         ComposeSimpleItem(
-                            description = TextNormalizer.cleanText(desc),
+                            description = cleanDesc,
                             totalAmountStr = if (amount > 0) moneyFormatter.format(amount.toLong()) else "",
-                            quantityStr = qty
+                            quantityStr = if (qtyStr.isNotBlank()) qtyStr else "1"
                         )
                     )
                 }
@@ -205,7 +200,7 @@ object QuartzInvoiceExtractor {
     }
 
     /**
-     * Extracts invoice data from a list of text lines (e.g. from PDF text extraction or pasted text).
+     * Extracts invoice data from a list of text lines (PDF text extraction or pasted text).
      */
     fun extractFromLines(lines: List<String>, sourceName: String = "PDF"): ParsedInvoiceResult {
         // Pre-process: fix reversed Persian lines if necessary
@@ -233,19 +228,20 @@ object QuartzInvoiceExtractor {
         val warnings = mutableListOf<String>()
 
         for (line in processedLines) {
+            if (line.isBlank()) continue
             val engLine = TextNormalizer.toEnglishDigits(line)
 
-            // Date matching
+            // 1. Date matching
             val dateMatch = Regex("""(1[34]\d{2}[/-]\d{1,2}[/-]\d{1,2})""").find(engLine)
             if (dateMatch != null && invoiceDate.isBlank()) {
                 invoiceDate = dateMatch.groupValues[1]
             }
 
-            // Buyer Name
-            if (line.contains("خریدار") || line.contains("آقای ") || line.contains("خانم ")) {
-                val match = Regex("""(?:نام خریدار|خریدار|نام حقیقی|نام حقیقی/حقوقی)\s*[:：]?\s*([^0-9\n]{2,30})""").find(line)
+            // 2. Buyer Name
+            if (line.contains("خریدار") || line.contains("آقای ") || line.contains("خانم ") || line.contains("طرف حساب")) {
+                val match = Regex("""(?:نام خریدار|خریدار|نام حقیقی|نام حقیقی/حقوقی|طرف حساب)\s*[:：]?\s*([^0-9\n]{2,30})""").find(line)
                 if (match != null && buyerName.isBlank()) {
-                    val name = match.groupValues[1].replace("شماره تماس", "").trim()
+                    val name = match.groupValues[1].replace("شماره تماس", "").replace("شماره", "").trim()
                     if (name.isNotBlank() && name != "مشخصات") {
                         buyerName = name
                     }
@@ -258,53 +254,46 @@ object QuartzInvoiceExtractor {
                 }
             }
 
-            // Seller
-            if (line.contains("کایند استون") || line.contains("کانتر استون") || line.contains("توتم")) {
-                if (sellerName.isBlank() && (line.contains("فروشنده") || line.contains("استون"))) {
-                    sellerName = "کایند استون - توتم"
-                }
-                if (invoiceTitle.isBlank()) {
-                    invoiceTitle = line.take(40)
+            // 3. Invoice Number
+            if (line.contains("شماره:") || line.contains("شماره فاکتور:") || line.contains("شماره سند:")) {
+                val after = line.substringAfter(":").trim()
+                if (after.isNotBlank() && invoiceNo.isBlank()) {
+                    invoiceNo = after
                 }
             }
-            if (line.contains("صفحات کابینت") && invoiceSubtitle.isBlank()) {
-                invoiceSubtitle = "فاکتور فروش صفحات کابینت کانترتاپ"
+
+            // 4. Stone Code & Type
+            if (line.contains("کد سنگ:") || line.contains("کد طرح:")) {
+                stoneCode = line.substringAfter(":").trim()
+            }
+            if (line.contains("نوع سنگ:") || line.contains("نوع متریال:")) {
+                stoneType = line.substringAfter(":").trim()
             }
 
-            // Signatures
-            if (line.contains("مدیر فروش")) {
-                val after = line.substringAfter("مدیر فروش").replace(":", "").replace("کارشناس فروش", "").trim()
-                if (after.isNotBlank() && managerSign.isBlank()) managerSign = after
-            }
-            if (line.contains("کارشناس فروش") || line.contains("مسئول فروش")) {
-                val after = line.substringAfter("فروش").replace(":", "").trim()
-                if (after.isNotBlank() && salesSign.isBlank() && !after.contains("مدیر")) salesSign = after
-            }
-
-            // Grand Total
-            if (line.contains("جمع") || line.contains("جمع کل")) {
-                val numbers = extractNumbersFromLine(engLine)
+            // 5. Grand Total Line
+            if (line.contains("جمع کل") || line.contains("مبلغ کل فاکتور") || line.startsWith("جمع:")) {
+                val numbers = extractAllNumbersFromLine(engLine)
                 val bigNum = numbers.firstOrNull { it > 100_000 }
                 if (bigNum != null) {
                     detectedTotal = bigNum
                 }
+                continue // Do not parse summary line as table row
             }
 
-            // Table Row Detection
-            // Case 1: Standard Quartz Dimension Line
-            // Line format typically has: [Item Description] [Width] [Length] [Price60] [PriceMade] [Total]
-            // Or reverse order: [Total] [PriceMade] [Price60] [Length] [Width] [Item Description]
-            val dimItem = parseDimensionalLine(line, engLine)
-            if (dimItem != null) {
-                normalItems.add(dimItem)
+            // Skip table header row
+            if (line.contains("شرح") && (line.contains("عرض") || line.contains("طول") || line.contains("فی"))) {
+                continue
+            }
+            if (line.startsWith("ردیف") && line.contains("شرح")) {
                 continue
             }
 
-            // Case 2: Service / Simple Item Line (e.g. "سینک کفتراش", "سینک زیرکار", "کرایه")
-            val serviceItem = parseServiceLine(line, engLine)
-            if (serviceItem != null) {
-                simpleItems.add(serviceItem)
-                continue
+            // 6. Parse Item Row (Never drop rows!)
+            val item = parseLineIntelligently(line, engLine)
+            if (item is ComposeInvoiceItem) {
+                normalItems.add(item)
+            } else if (item is ComposeSimpleItem) {
+                simpleItems.add(item)
             }
         }
 
@@ -329,90 +318,189 @@ object QuartzInvoiceExtractor {
         )
     }
 
-    private fun isServiceKeyword(desc: String): Boolean {
-        return desc.contains("سینک") || desc.contains("کرایه") || desc.contains("حمل") ||
-                desc.contains("نصب") || desc.contains("کفتراش") || desc.contains("زیرکار") ||
-                desc.contains("برش") || desc.contains("سوراخ")
-    }
+    /**
+     * Intelligently parses a single text line into either a ComposeInvoiceItem or ComposeSimpleItem without dropping it.
+     */
+    private fun parseLineIntelligently(line: String, engLine: String): Any? {
+        // Strip leading row number (e.g. "1.", "1 ", "۲-", "(3)")
+        val lineWithoutRowIndex = stripLeadingRowIndex(line)
+        val engLineWithoutRowIndex = stripLeadingRowIndex(engLine)
 
-    private fun parseDimensionalLine(line: String, engLine: String): ComposeInvoiceItem? {
-        val keywords = listOf("جزیره", "صفحه", "دیوارکوب", "بین کابینتی", "دیوار کوب", "مطبخ", "استخر", "کابینت", "قرنیز")
-        val hasKeyword = keywords.any { line.contains(it) }
-        if (!hasKeyword) return null
+        val numbers = extractAllNumbersFromLine(engLineWithoutRowIndex)
 
-        // Extract tokens and numbers
-        val numbers = extractNumbersFromLine(engLine)
-        if (numbers.size < 2) return null
+        // Separate prices (big numbers) from dimensions (small numbers)
+        val bigPrices = numbers.filter { it >= 100_000 }
+        val smallDimensions = numbers.filter { it < 100_000 }
 
-        // In this invoice format, width is typically 15..200 (cm)
-        // Length is typically 0.5..20.0 (m)
-        // Base price 60 is typically >= 10,000,000 (Rials)
+        // Clean description text
+        val cleanDesc = cleanRowDescription(lineWithoutRowIndex)
+        if (cleanDesc.isBlank() && numbers.isEmpty()) return null
+
+        // Check for Service / Simple Item keywords (e.g. سینک, کرایه, حمل, نصب, برش, فارسی, ابزار)
+        if (isServiceKeyword(cleanDesc) || (smallDimensions.isEmpty() && bigPrices.isNotEmpty())) {
+            val bigPrice = bigPrices.firstOrNull()
+            val qtyMatch = Regex("""(\d+)\s*(?:عدد|مورد|شاخه|متر)""").find(engLine)
+            val qty = qtyMatch?.groupValues?.get(1) ?: "1"
+
+            return ComposeSimpleItem(
+                description = cleanDesc.ifBlank { "خدمات / متفرقه" },
+                totalAmountStr = if (bigPrice != null) moneyFormatter.format(bigPrice.toLong()) else "",
+                quantityStr = qty
+            )
+        }
+
+        // Dimensional Stone Item:
+        // Try to identify width (in cm) and length (in m)
         var widthNum: Double? = null
         var lengthNum: Double? = null
-        var price60Num: Double? = null
+        var unitPrice: Double? = null
 
-        // Find width (typically integer between 15 and 250)
-        // Find length (typically float <= 30.0)
-        // Find big prices (>= 1,000,000)
-        for (n in numbers) {
-            if (n >= 1_000_000 && price60Num == null) {
-                price60Num = n
-            } else if (n in 15.0..250.0 && widthNum == null && n % 1.0 == 0.0) {
+        // If we have unit price and total price in big prices:
+        // typically unit price is in range 1,000,000 to 500,000,000
+        if (bigPrices.isNotEmpty()) {
+            unitPrice = if (bigPrices.size >= 2) bigPrices.minOrNull() else bigPrices.firstOrNull()
+        }
+
+        // Identify dimensions from small numbers
+        // Patterns:
+        // Width could be:
+        //   - Written as cm: 57, 60, 65, 70, 80, 90, 100, 120 (10 <= n <= 300)
+        //   - Written as meter / decimal: .57, 0.57, .60, 0.60, .90, 0.90 (0.05 <= n < 3.0)
+        // Length could be:
+        //   - Written in meters: 3.4, 2.85, 0.9, 1.5, 4.2, 5.0 (0.1 <= n <= 50.0)
+
+        for (n in smallDimensions) {
+            // Check if n is a decimal width like .57 or 0.57
+            if (widthNum == null && (n in 0.05..2.5 && n != 1.0 && n != 2.0 && n.toString().contains("."))) {
+                // If length is already set, or if this looks like a width (.57, .60, .90)
+                if (isDecimalWidth(n)) {
+                    widthNum = n
+                    continue
+                }
+            }
+
+            // Check if n is an integer width in cm (e.g. 57, 60, 65, 90, 120)
+            if (widthNum == null && n in 15.0..300.0 && n % 1.0 == 0.0) {
                 widthNum = n
-            } else if (n in 0.2..30.0 && lengthNum == null) {
+                continue
+            }
+
+            // Length (e.g. 3.4, 2.85, 0.9, 1.5)
+            if (lengthNum == null && n in 0.1..50.0) {
                 lengthNum = n
+                continue
             }
         }
 
-        // Clean description by removing isolated numeric tokens from line
-        val desc = line.replace(Regex("""\b\d+(?:[.,/]\d+)?\b"""), "")
-            .replace(",", "")
-            .replace("ریال", "")
-            .replace("-", "")
-            .trim()
+        // If we found at least one dimension or description, create ComposeInvoiceItem
+        if (widthNum != null || lengthNum != null || cleanDesc.isNotBlank()) {
+            val finalWidth = standardizeWidth(widthNum ?: 60.0)
+            val finalLength = standardizeLength(lengthNum ?: 1.0)
+            val p60Formatted = formatPrice(unitPrice)
 
-        if (widthNum != null && lengthNum != null && desc.isNotBlank()) {
-            val p60Formatted = if (price60Num != null && price60Num > 0) moneyFormatter.format(price60Num.toLong()) else "115,000,000"
             return ComposeInvoiceItem(
-                description = TextNormalizer.cleanText(desc),
-                width = widthNum.toInt().toString(),
-                length = if (lengthNum % 1.0 == 0.0) lengthNum.toInt().toString() else lengthNum.toString(),
+                description = cleanDesc.ifBlank { "ردیف سنگی" },
+                width = finalWidth,
+                length = finalLength,
                 price60cm = p60Formatted
             )
         }
+
         return null
     }
 
-    private fun parseServiceLine(line: String, engLine: String): ComposeSimpleItem? {
-        if (!isServiceKeyword(line)) return null
+    private fun parseRowHeuristically(row: List<String>): Any? {
+        val nonBlank = row.map { TextNormalizer.cleanText(it) }.filter { it.isNotBlank() }
+        if (nonBlank.isEmpty()) return null
 
-        val numbers = extractNumbersFromLine(engLine)
-        val bigPrice = numbers.firstOrNull { it >= 100_000 }
-
-        val qtyMatch = Regex("""(\d+)\s*عدد""").find(engLine)
-        val qty = qtyMatch?.groupValues?.get(1) ?: "1"
-
-        val cleanDesc = line.replace(Regex("""\b\d{4,}\b"""), "")
-            .replace(",", "")
-            .replace("ریال", "")
-            .replace("-", "")
-            .trim()
-
-        return ComposeSimpleItem(
-            description = TextNormalizer.cleanText(cleanDesc),
-            totalAmountStr = if (bigPrice != null) moneyFormatter.format(bigPrice.toLong()) else "",
-            quantityStr = qty
-        )
+        val rowText = nonBlank.joinToString(" ")
+        val engText = TextNormalizer.toEnglishDigits(rowText)
+        return parseLineIntelligently(rowText, engText)
     }
 
-    private fun extractNumbersFromLine(line: String): List<Double> {
-        val matches = Regex("""(\d+(?:[.,/]\d+)?)""").findAll(line)
+    /**
+     * Extracts all numbers (including decimals starting with '.', e.g. ".57" -> 0.57).
+     */
+    private fun extractAllNumbersFromLine(line: String): List<Double> {
         val list = mutableListOf<Double>()
+        // Match numbers like: 115,000,000 or 586.500.000 or 3.4 or .57 or /57 or 0.57
+        val regex = Regex("""(?:(?:\d{1,3}(?:[,_]\d{3})+|\d+)(?:[.,/]\d+)?|[.,/]\d+)""")
+        val matches = regex.findAll(line)
         for (m in matches) {
-            val raw = m.groupValues[1].replace('/', '.')
-            val d = raw.toDoubleOrNull()
-            if (d != null) list.add(d)
+            val raw = m.value
+            val num = TextNormalizer.parseNumber(raw)
+            if (num != null) {
+                list.add(num)
+            }
         }
         return list
+    }
+
+    private fun isDecimalWidth(n: Double): Boolean {
+        // Common decimal widths in quartz/stone: .57, .58, .60, .65, .70, .80, .90, .100, .120
+        val inCm = (n * 100.0).roundToInt()
+        return inCm in 20..250
+    }
+
+    /**
+     * Standardizes width to integer centimeters string (e.g. 0.57 or .57 -> "57", 60 -> "60").
+     */
+    private fun standardizeWidth(w: Double): String {
+        return if (w < 3.0 && w > 0.0) {
+            // It was entered in meters (e.g. 0.57 or .57) -> convert to cm
+            (w * 100.0).roundToInt().toString()
+        } else {
+            w.toInt().toString()
+        }
+    }
+
+    /**
+     * Standardizes length to meters string (e.g. 3.4 -> "3.4", 2.0 -> "2").
+     */
+    private fun standardizeLength(l: Double): String {
+        return if (l % 1.0 == 0.0) {
+            l.toInt().toString()
+        } else {
+            l.toString()
+        }
+    }
+
+    private fun formatPrice(price: Double?): String {
+        return if (price != null && price > 0) {
+            moneyFormatter.format(price.toLong())
+        } else {
+            ""
+        }
+    }
+
+    private fun stripLeadingRowIndex(text: String): String {
+        return text.replace(Regex("""^\s*(?:\d+|[۰-۹]+)[\s.\-–:)]+\s*"""), "").trim()
+    }
+
+    private fun cleanRowDescription(rawDesc: String): String {
+        return rawDesc
+            .replace(Regex("""\b(?:\d{1,3}(?:[,_]\d{3})+|\d+(?:[.,/]\d+)?|[.,/]\d+)\b"""), "")
+            .replace("ریال", "")
+            .replace("تومان", "")
+            .replace("مترطول", "")
+            .replace("متر مربع", "")
+            .replace("متر", "")
+            .replace("سانت", "")
+            .replace("cm", "", ignoreCase = true)
+            .replace("m", "", ignoreCase = true)
+            .replace("-", " ")
+            .replace("–", " ")
+            .replace(":", " ")
+            .replace("،", " ")
+            .trim()
+    }
+
+    private fun isServiceKeyword(desc: String): Boolean {
+        val keywords = listOf(
+            "سینک", "کرایه", "حمل", "نصب", "کفتراش", "زیرکار", "روکار",
+            "برش", "گاز", "سوراخ", "شیر", "جای سینک", "جای گاز",
+            "ابزار", "فارسی", "پخ", "دوبل", "لبه", "تراش", "ساب", "بسته‌بندی"
+        )
+        return keywords.any { desc.contains(it) }
     }
 }

@@ -1098,8 +1098,92 @@ class InvoiceViewModel(
         }
     }
 
+    /**
+     * Reads and restores all .qzb invoices from a user-selected folder (e.g. Documents/IranQuartz/Backup faktors).
+     */
+    fun restoreFromFolderTree(context: Context, treeUri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            isBackupOperationLoading = true
+            try {
+                try {
+                    val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    context.contentResolver.takePersistableUriPermission(treeUri, flags)
+                } catch (e: Exception) {
+                    // Ignore persistable flag errors
+                }
+
+                val foundInvoices = InvoiceBackupManager.restoreFromTreeUri(context, treeUri)
+                var importedCount = 0
+                for (inv in foundInvoices) {
+                    val existing = repository.getInvoiceById(inv.id)
+                    if (existing == null) {
+                        repository.insertInvoice(inv)
+                        importedCount++
+                    } else {
+                        repository.updateInvoice(inv)
+                        importedCount++
+                    }
+                    InvoiceBackupManager.saveInvoiceBackup(inv)
+                }
+                refreshAvailableBackups()
+
+                withContext(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    if (importedCount > 0) {
+                        backupOperationMessage = "✅ بازیابی پوشه با موفقیت انجام شد:\n$importedCount فاکتور (.qzb) از پوشه انتخابی خوانده و به لیست فاکتورهای شما اضافه شد."
+                        Toast.makeText(context, "$importedCount فاکتور با موفقیت به لیست اضافه شد", Toast.LENGTH_LONG).show()
+                    } else {
+                        backupOperationMessage = "هیچ فایل فاکتور با پسوند .qzb در این پوشه یافت نشد. لطفاً مطمئن شوید پوشه Documents/IranQuartz یا Backup faktors را انتخاب کرده‌اید."
+                        Toast.makeText(context, "فایل فاکتوری در این پوشه یافت نشد", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    Toast.makeText(context, "خطا در خواندن پوشه: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * Reads and restores multiple user-selected .qzb files.
+     */
+    fun restoreFromMultipleUris(context: Context, uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            isBackupOperationLoading = true
+            try {
+                val foundInvoices = InvoiceBackupManager.restoreFromMultipleUris(context, uris)
+                var importedCount = 0
+                for (inv in foundInvoices) {
+                    repository.insertInvoice(inv)
+                    InvoiceBackupManager.saveInvoiceBackup(inv)
+                    importedCount++
+                }
+                refreshAvailableBackups()
+
+                withContext(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    if (importedCount > 0) {
+                        backupOperationMessage = "✅ $importedCount فاکتور انتخابی با موفقیت به لیست فاکتورهای شما اضافه شد."
+                        Toast.makeText(context, "$importedCount فاکتور با موفقیت بازیابی شد", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "فایل‌های انتخاب‌شده معتبر نبودند", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    Toast.makeText(context, "خطا در بازیابی فایل‌ها: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     fun triggerSyncAndLoadBackups(context: Context) {
         viewModelScope.launch(Dispatchers.IO) {
+            isBackupOperationLoading = true
             try {
                 var importedCount = 0
                 val backups = InvoiceBackupManager.loadAllBackups()
@@ -1108,6 +1192,11 @@ class InvoiceViewModel(
                     if (existing == null) {
                         repository.insertInvoice(backup)
                         importedCount++
+                    } else {
+                        // Ensure it's not marked deleted if active in backup
+                        if (!backup.isDeleted && existing.isDeleted) {
+                            repository.setDeletedStatus(backup.id, false)
+                        }
                     }
                 }
                 
@@ -1120,11 +1209,23 @@ class InvoiceViewModel(
                     }
                 }
 
-                launch(Dispatchers.Main) {
-                    Toast.makeText(context, "$importedCount فاکتور با موفقیت از پوشه پشتیبان بازیابی شدند.", Toast.LENGTH_LONG).show()
+                refreshAvailableBackups()
+
+                withContext(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    if (importedCount > 0) {
+                        backupOperationMessage = "✅ $importedCount فاکتور از پوشه پشتیبان Documents/IranQuartz/Backup faktors با موفقیت شناسایی و بازیابی شد."
+                        Toast.makeText(context, "$importedCount فاکتور با موفقیت از حافظه بازگردانی شد.", Toast.LENGTH_LONG).show()
+                    } else if (backups.isNotEmpty()) {
+                        Toast.makeText(context, "تمامی فاکتورهای حافظه (${backups.size} فاکتور) در دیتابیس حاضر و همگام هستند.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        backupOperationMessage = "فایلی در مسیرهای پیش‌فرض پیدا نشد. می‌توانید با دکمه «انتخاب پوشه Backup faktors»، پوشه را انتخاب کنید تا تمام فایل‌ها خوانده شوند."
+                        Toast.makeText(context, "فایلی در پوشه پیش‌فرض یافت نشد. دکمه انتخاب پوشه را بزنید.", Toast.LENGTH_LONG).show()
+                    }
                 }
             } catch (e: Exception) {
-                launch(Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
+                    isBackupOperationLoading = false
                     Toast.makeText(context, "خطا در همگام‌سازى بکاپ: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }

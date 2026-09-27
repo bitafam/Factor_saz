@@ -31,23 +31,40 @@ object TextNormalizer {
     }
 
     /**
-     * Parse monetary or number string (e.g. "115,000,000", "586,500,000", "2.55", "3/4")
+     * Parse monetary or number string (e.g. "115,000,000", "586,500,000", "2.55", "3/4", ".57", "/57", "،57")
      */
     fun parseNumber(str: String): Double? {
-        val eng = toEnglishDigits(str)
-            .replace(",", "")
-            .replace(" ", "")
+        val raw = toEnglishDigits(str)
             .replace("ریال", "")
             .replace("تومان", "")
+            .replace("متر", "")
+            .replace("سانت", "")
+            .replace("cm", "", ignoreCase = true)
+            .replace("m", "", ignoreCase = true)
+            .replace(" ", "")
             .trim()
-        if (eng.isBlank()) return null
-        
-        // Handle slash as decimal separator in Persian (e.g. 3/4 -> 3.4)
-        val normalized = if (eng.contains('/') && !eng.contains('.')) {
-            eng.replace('/', '.')
-        } else {
-            eng
+        if (raw.isBlank()) return null
+
+        // Replace Persian decimal separators ('/' or '،') with standard '.'
+        var normalized = raw
+            .replace('،', '.')
+            .replace('/', '.')
+
+        // If it starts with '.' (e.g. ".57" or ".5"), prepend '0' -> "0.57"
+        if (normalized.startsWith(".")) {
+            normalized = "0$normalized"
         }
+
+        // If it has commas (e.g. 115,000,000), strip commas if used as thousands separators
+        if (normalized.contains(",")) {
+            // If comma is used like 3,4 and no other commas, treat as decimal, else remove
+            if (normalized.count { it == ',' } == 1 && normalized.substringAfter(',').length <= 2) {
+                normalized = normalized.replace(',', '.')
+            } else {
+                normalized = normalized.replace(",", "")
+            }
+        }
+
         return normalized.toDoubleOrNull()
     }
 
