@@ -122,7 +122,8 @@ class InvoiceImportTest {
         assertEquals("آقای کارگر", result.buyerName)
         assertEquals(2, result.normalItems.size)
         assertEquals(1, result.simpleItems.size)
-        assertEquals("سینک کفتراش 4 عدد", result.simpleItems[0].description)
+        assertEquals("سینک کفتراش", result.simpleItems[0].description)
         assertEquals("4", result.simpleItems[0].quantityStr)
+        assertEquals("160,000,000", result.simpleItems[0].totalAmountStr)
     }
 }
