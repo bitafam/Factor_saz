@@ -54,7 +54,7 @@ private val formatter = DecimalFormat("#,###")
 fun formatMoney(value: Any): String {
     return try {
         val num = when (value) {
-            is String -> value.replace(",", "").toDoubleOrNull() ?: 0.0
+            is String -> com.example.util.importer.TextNormalizer.parseNumber(value) ?: 0.0
             is Number -> value.toDouble()
             else -> 0.0
         }
@@ -1145,7 +1145,8 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
                 // 4.1 Percentage Items ListView Cards
                 val baseSumForPercentages = viewModel.normalItems.sumOf { it.totalAmount } + viewModel.simpleItems.sumOf { it.totalAmount }
                 itemsIndexed(viewModel.percentageItems) { index, item ->
-                    val calculatedAmt = (baseSumForPercentages * (item.percentageStr.toDoubleOrNull() ?: 0.0)) / 100.0
+                    val pct = com.example.util.importer.TextNormalizer.parseNumber(item.percentageStr) ?: 0.0
+                    val calculatedAmt = ((baseSumForPercentages * pct) / 100.0).let { kotlin.math.round(it) }
                     PercentageItemRowCard(
                         rowNum = viewModel.normalItems.size + viewModel.simpleItems.size + index + 1,
                         description = item.description,

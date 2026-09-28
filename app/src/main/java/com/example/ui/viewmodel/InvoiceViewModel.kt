@@ -173,14 +173,16 @@ class InvoiceViewModel(
         val newNo = newInv.invoiceNo.trim()
         val newBuyer = newInv.buyerName.trim()
         val newDate = newInv.invoiceDate.trim()
-        val newTotal = newInv.totalAmount
+        val newCalcTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(newInv)
+        val newTotal = if (newCalcTotal > 0.0) newCalcTotal else newInv.totalAmount
 
         return existingList.any { existing ->
             if (existing.isDeleted) return@any false
             val exNo = existing.invoiceNo.trim()
             val exBuyer = existing.buyerName.trim()
             val exDate = existing.invoiceDate.trim()
-            val exTotal = existing.totalAmount
+            val exCalcTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(existing)
+            val exTotal = if (exCalcTotal > 0.0) exCalcTotal else existing.totalAmount
 
             // Match 1: Same invoice number (if not generic/blank) and same buyer
             val noMatch = exNo.isNotBlank() && !exNo.startsWith("INV-") && 
@@ -248,14 +250,24 @@ class InvoiceViewModel(
                 }
             }
 
-            // Sync/Read backups in public DOCUMENTS directory to auto-restore only if database is completely empty (reinstall)
+            // Ensure all existing invoices in database have exact totalAmount calculated from their items
             try {
                 val existingInvoices = repository.getAllInvoicesDirect().toMutableList()
+                for (inv in existingInvoices) {
+                    val calcTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(inv)
+                    if (calcTotal > 0.0 && kotlin.math.abs(calcTotal - inv.totalAmount) >= 0.5) {
+                        repository.updateInvoice(inv.copy(totalAmount = calcTotal))
+                    }
+                }
+
+                // Sync/Read backups in public DOCUMENTS directory to auto-restore only if database is completely empty (reinstall)
                 if (existingInvoices.isEmpty()) {
                     val backups = InvoiceBackupManager.loadAllBackups()
                     for (backup in backups) {
-                        if (!isDuplicateInvoice(backup, existingInvoices)) {
-                            val clean = backup.copy(id = 0, isDeleted = false)
+                        val exactTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(backup)
+                        val normalized = if (exactTotal > 0.0) backup.copy(totalAmount = exactTotal) else backup
+                        if (!isDuplicateInvoice(normalized, existingInvoices)) {
+                            val clean = normalized.copy(id = 0, isDeleted = false)
                             val newId = repository.insertInvoice(clean)
                             existingInvoices.add(clean.copy(id = newId.toInt()))
                         }
@@ -1124,11 +1136,13 @@ class InvoiceViewModel(
         var duplicatesCount = 0
         val existingList = repository.getAllInvoicesDirect().toMutableList()
         for (inv in result.invoices) {
-            if (isDuplicateInvoice(inv, existingList)) {
+            val exactTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(inv)
+            val normalizedInv = if (exactTotal > 0.0) inv.copy(totalAmount = exactTotal) else inv
+            if (isDuplicateInvoice(normalizedInv, existingList)) {
                 duplicatesCount++
                 continue
             }
-            val cleanInv = inv.copy(id = 0, isDeleted = false)
+            val cleanInv = normalizedInv.copy(id = 0, isDeleted = false)
             val newId = repository.insertInvoice(cleanInv)
             existingList.add(cleanInv.copy(id = newId.toInt()))
             importedInvoicesCount++
@@ -1199,10 +1213,12 @@ class InvoiceViewModel(
                     val parseResult = InvoiceBackupManager.parseBackupContent(json)
                     if (parseResult.success && parseResult.invoices.isNotEmpty()) {
                         for (inv in parseResult.invoices) {
-                            if (isDuplicateInvoice(inv, existingInvoices)) {
+                            val exactTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(inv)
+                            val normalizedInv = if (exactTotal > 0.0) inv.copy(totalAmount = exactTotal) else inv
+                            if (isDuplicateInvoice(normalizedInv, existingInvoices)) {
                                 duplicateCount++
                             } else {
-                                val cleanInv = inv.copy(id = 0, isDeleted = false)
+                                val cleanInv = normalizedInv.copy(id = 0, isDeleted = false)
                                 val newId = repository.insertInvoice(cleanInv)
                                 existingInvoices.add(cleanInv.copy(id = newId.toInt()))
                                 addedCount++

@@ -214,31 +214,33 @@ object InvoiceBackupManager {
                 val invArray = rootObj.optJSONArray("invoices") ?: JSONArray()
                 for (i in 0 until invArray.length()) {
                     val invObj = invArray.getJSONObject(i)
-                    invoicesList.add(
-                        InvoiceEntity(
-                            id = invObj.optInt("id", 0),
-                            invoiceNo = invObj.optString("invoiceNo", ""),
-                            invoiceDate = invObj.optString("invoiceDate", ""),
-                            buyerName = invObj.optString("buyerName", ""),
-                            sellerName = invObj.optString("sellerName", ""),
-                            sellerPhone = invObj.optString("sellerPhone", ""),
-                            sellerAddress = invObj.optString("sellerAddress", ""),
-                            stoneCode = invObj.optString("stoneCode", ""),
-                            stoneType = invObj.optString("stoneType", ""),
-                            managerSign = invObj.optString("managerSign", ""),
-                            salesSign = invObj.optString("salesSign", ""),
-                            itemsJson = invObj.optString("itemsJson", "[]"),
-                            simpleItemsJson = invObj.optString("simpleItemsJson", "[]"),
-                            percentageItemsJson = invObj.optString("percentageItemsJson", "[]"),
-                            invoiceTitle = invObj.optString("invoiceTitle", ""),
-                            invoiceSubtitle = invObj.optString("invoiceSubtitle", ""),
-                            totalAmount = invObj.optDouble("totalAmount", 0.0),
-                            createdAt = invObj.optLong("createdAt", System.currentTimeMillis()),
-                            isDeleted = invObj.optBoolean("isDeleted", false),
-                            managerSignImgBase64 = invObj.optString("managerSignImgBase64", ""),
-                            salesSignImgBase64 = invObj.optString("salesSignImgBase64", "")
-                        )
+                    val rawTotalStr = invObj.optString("totalAmount", "")
+                    val parsedTotal = com.example.util.importer.TextNormalizer.parseNumber(rawTotalStr) ?: invObj.optDouble("totalAmount", 0.0)
+                    val entity = InvoiceEntity(
+                        id = invObj.optInt("id", 0),
+                        invoiceNo = invObj.optString("invoiceNo", ""),
+                        invoiceDate = invObj.optString("invoiceDate", ""),
+                        buyerName = invObj.optString("buyerName", ""),
+                        sellerName = invObj.optString("sellerName", ""),
+                        sellerPhone = invObj.optString("sellerPhone", ""),
+                        sellerAddress = invObj.optString("sellerAddress", ""),
+                        stoneCode = invObj.optString("stoneCode", ""),
+                        stoneType = invObj.optString("stoneType", ""),
+                        managerSign = invObj.optString("managerSign", ""),
+                        salesSign = invObj.optString("salesSign", ""),
+                        itemsJson = invObj.optString("itemsJson", "[]"),
+                        simpleItemsJson = invObj.optString("simpleItemsJson", "[]"),
+                        percentageItemsJson = invObj.optString("percentageItemsJson", "[]"),
+                        invoiceTitle = invObj.optString("invoiceTitle", ""),
+                        invoiceSubtitle = invObj.optString("invoiceSubtitle", ""),
+                        totalAmount = parsedTotal,
+                        createdAt = invObj.optLong("createdAt", System.currentTimeMillis()),
+                        isDeleted = invObj.optBoolean("isDeleted", false),
+                        managerSignImgBase64 = invObj.optString("managerSignImgBase64", ""),
+                        salesSignImgBase64 = invObj.optString("salesSignImgBase64", "")
                     )
+                    val calcTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(entity)
+                    invoicesList.add(if (calcTotal > 0.0) entity.copy(totalAmount = calcTotal) else entity)
                 }
 
                 // Config
@@ -443,7 +445,7 @@ object InvoiceBackupManager {
      */
     fun deserializeInvoice(json: String): InvoiceEntity {
         val obj = JSONObject(json)
-        return InvoiceEntity(
+        val entity = InvoiceEntity(
             id = obj.optInt("id", 0),
             invoiceNo = obj.optString("invoiceNo", ""),
             invoiceDate = obj.optString("invoiceDate", ""),
@@ -460,12 +462,14 @@ object InvoiceBackupManager {
             percentageItemsJson = obj.optString("percentageItemsJson", "[]"),
             invoiceTitle = obj.optString("invoiceTitle", ""),
             invoiceSubtitle = obj.optString("invoiceSubtitle", ""),
-            totalAmount = obj.optDouble("totalAmount", 0.0),
+            totalAmount = com.example.util.importer.TextNormalizer.parseNumber(obj.optString("totalAmount", "")) ?: obj.optDouble("totalAmount", 0.0),
             createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
             isDeleted = obj.optBoolean("isDeleted", false),
             managerSignImgBase64 = obj.optString("managerSignImgBase64", ""),
             salesSignImgBase64 = obj.optString("salesSignImgBase64", "")
         )
+        val calcTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(entity)
+        return if (calcTotal > 0.0) entity.copy(totalAmount = calcTotal) else entity
     }
 
     /**

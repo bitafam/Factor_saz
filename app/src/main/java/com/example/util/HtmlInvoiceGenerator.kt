@@ -276,12 +276,15 @@ object HtmlInvoiceGenerator {
             val totalAmountCalculated = item.totalAmount
             calculatedTotal += totalAmountCalculated
 
+            val displayWidth = item.width.trim().ifBlank { "60" }
+            val displayLength = item.length.trim().ifBlank { "-" }
+
             sb.append("""
                 <tr>
                     <td>${itemIndex++}</td>
                     <td style="text-align: right;">${item.description.ifBlank { "محاسبه سنگ کوارتز" }}</td>
-                    <td>${item.width}</td>
-                    <td>${item.length}</td>
+                    <td>${displayWidth}</td>
+                    <td>${displayLength}</td>
                     <td>${formatPrice(item.price60cm)} ریال</td>
                     <td>${formatAmount(finalPriceCalculated)} ریال</td>
                     <td>${formatAmount(totalAmountCalculated)} ریال</td>
@@ -294,9 +297,9 @@ object HtmlInvoiceGenerator {
             val amount = item.totalAmount
             calculatedTotal += amount
             val descEx = if (item.quantityStr.isNotBlank()) {
-                "${item.description} (تعداد: ${item.quantityStr})"
+                "${item.description.ifBlank { "خدمات جانبی" }} (تعداد: ${item.quantityStr})"
             } else {
-                item.description
+                item.description.ifBlank { "خدمات جانبی" }
             }
 
             sb.append("""
@@ -323,7 +326,7 @@ object HtmlInvoiceGenerator {
             sb.append("""
                 <tr style="background: #fffde7;">
                     <td>${itemIndex++}</td>
-                    <td style="text-align: right;">${item.description} (${item.percentageStr} درصد)</td>
+                    <td style="text-align: right;">${item.description.ifBlank { "درصد محاسباتی" }} (${item.percentageStr} درصد)</td>
                     <td>-</td>
                     <td>-</td>
                     <td>-</td>
@@ -333,11 +336,13 @@ object HtmlInvoiceGenerator {
             """.trimIndent())
         }
 
+        val finalGrandTotal = if (calculatedTotal > 0.0) calculatedTotal else invoice.totalAmount
+
         // 4. Grand total row
         sb.append("""
                 <tr class="total-row">
                     <td colspan="6" style="text-align: left; padding: 12px;">جمع کل فاکتور:</td>
-                    <td style="color: #004d40; font-size: 14px; font-weight: bold;">${df.format(calculatedTotal)} ریال</td>
+                    <td style="color: #004d40; font-size: 14px; font-weight: bold;">${df.format(finalGrandTotal)} ریال</td>
                 </tr>
             </tbody>
             </table>
@@ -374,9 +379,28 @@ object HtmlInvoiceGenerator {
         return sb.toString()
     }
 
+    fun calculateInvoiceTotal(invoice: InvoiceEntity): Double {
+        val normalItems = ItemJsonConverter.deserializeInvoiceItems(invoice.itemsJson)
+        val simpleItems = ItemJsonConverter.deserializeSimpleItems(invoice.simpleItemsJson)
+        val percentageItems = ItemJsonConverter.deserializePercentageItems(invoice.percentageItemsJson)
+
+        val normalSum = normalItems.sumOf { it.totalAmount }
+        val simpleSum = simpleItems.sumOf { it.totalAmount }
+        val baseSum = normalSum + simpleSum
+        val percentSum = percentageItems.sumOf {
+            val pct = com.example.util.importer.TextNormalizer.parseNumber(it.percentageStr) ?: 0.0
+            ((baseSum * pct) / 100.0).let { kotlin.math.round(it) }
+        }
+        val calculated = (baseSum + percentSum).let { kotlin.math.round(it) }
+        return if (calculated > 0.0) calculated else invoice.totalAmount
+    }
+
     fun generateSummaryHtml(startDate: String, endDate: String, invoices: List<InvoiceEntity>): String {
         val df = DecimalFormat("#,###")
-        val grandTotal = invoices.sumOf { it.totalAmount }
+        val grandTotal = invoices.sumOf { inv ->
+            val calc = calculateInvoiceTotal(inv)
+            if (calc > 0.0) calc else inv.totalAmount
+        }
         
         val sb = StringBuilder()
         sb.append("""
@@ -533,6 +557,7 @@ object HtmlInvoiceGenerator {
         """.trimIndent())
         
         invoices.forEachIndexed { idx, inv ->
+            val rowTotal = calculateInvoiceTotal(inv).let { if (it > 0.0) it else inv.totalAmount }
             val codeDesc = buildString {
                 if (inv.stoneCode.isNotBlank()) append(inv.stoneCode)
                 if (inv.stoneType.isNotBlank()) {
@@ -548,7 +573,7 @@ object HtmlInvoiceGenerator {
                     <td>${inv.sellerPhone.ifBlank { inv.invoiceNo }}</td>
                     <td>${codeDesc}</td>
                     <td>${inv.invoiceDate}</td>
-                    <td style="font-weight: bold; color: #004d40;">${df.format(inv.totalAmount)} ریال</td>
+                    <td style="font-weight: bold; color: #004d40;">${df.format(rowTotal)} ریال</td>
                 </tr>
             """.trimIndent())
         }
@@ -578,9 +603,8 @@ object HtmlInvoiceGenerator {
     }
 
     private fun formatPrice(priceStr: String): String {
-        val cleaned = priceStr.replace(",", "").trim()
-        val d = cleaned.toDoubleOrNull() ?: return "0"
-        return df.format(d)
+        val num = com.example.util.importer.TextNormalizer.parseNumber(priceStr) ?: return "0"
+        return df.format(num)
     }
 
     private fun formatAmount(value: Double): String {
