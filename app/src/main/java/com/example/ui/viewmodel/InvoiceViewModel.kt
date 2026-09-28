@@ -483,6 +483,23 @@ class InvoiceViewModel(
         }
     }
 
+    /**
+     * Saves a specific digital signature image directly as the app's default in settings/database.
+     */
+    fun saveSignatureAsDefault(isManager: Boolean, signatureBase64: String) {
+        viewModelScope.launch {
+            val currentConfig = repository.getConfigDirect() ?: ConfigEntity(deviceId = LicenseManager.getDeviceId(context))
+            val updated = if (isManager) {
+                currentConfig.copy(defaultManagerSignImg = signatureBase64)
+            } else {
+                currentConfig.copy(defaultSalesSignImg = signatureBase64)
+            }
+            repository.saveConfig(updated)
+            val label = if (isManager) "امضای اول (مدیریت)" else "امضای دوم (فروش)"
+            Toast.makeText(context, "$label به عنوان امضای پیش‌فرض در تنظیمات ذخیره شد", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // Add list items
     fun addNormalItemRow() {
         normalItems.add(ComposeInvoiceItem())

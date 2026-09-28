@@ -44,6 +44,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import android.net.Uri
 import com.example.util.JalaliCalendar
+import com.example.util.InvoiceItemHelper
+import com.example.ui.components.LargeDigitalSignatureDialog
 import com.example.data.database.InvoiceEntity
 import com.example.data.model.*
 import com.example.ui.viewmodel.InvoiceViewModel
@@ -828,6 +830,45 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
     var showPercentageAddDialog by remember { mutableStateOf(false) }
     var editingSimpleIndex by remember { mutableStateOf<Int?>(null) }
     var editingPercentageIndex by remember { mutableStateOf<Int?>(null) }
+    var digitalSignatureTarget by remember { mutableStateOf<String?>(null) }
+
+    val editorManagerSignLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val bytes = inputStream?.readBytes()
+                inputStream?.close()
+                if (bytes != null) {
+                    val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.DEFAULT)
+                    val mime = context.contentResolver.getType(uri) ?: "image/png"
+                    viewModel.managerSignImgBase64 = "data:$mime;base64,$base64"
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "خطا در خواندن تصویر: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    val editorSalesSignLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            try {
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val bytes = inputStream?.readBytes()
+                inputStream?.close()
+                if (bytes != null) {
+                    val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.DEFAULT)
+                    val mime = context.contentResolver.getType(uri) ?: "image/png"
+                    viewModel.salesSignImgBase64 = "data:$mime;base64,$base64"
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "خطا در خواندن تصویر: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -1258,36 +1299,243 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("امضاکنندگان فاکتور", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("مهر و امضای دیجیتال فاکتور", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
+                                }
+                                Text("جهت درج روی PDF و چاپ", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                            // Manager Signature Section
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 OutlinedTextField(
                                     value = viewModel.managerSign,
                                     onValueChange = { viewModel.managerSign = it },
-                                    label = { Text("سمت امضاکننده اول") },
+                                    label = { Text("سمت امضاکننده اول (مثال: مهر و امضاء مدیریت)") },
                                     singleLine = true,
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                                         focusedLabelColor = MaterialTheme.colorScheme.primary
                                     ),
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.fillMaxWidth()
                                 )
+
+                                if (viewModel.managerSignImgBase64.isNotBlank()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(90.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.White)
+                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                                            .clickable { digitalSignatureTarget = "MANAGER" },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Base64Image(base64Str = viewModel.managerSignImgBase64, modifier = Modifier.fillMaxSize().padding(6.dp))
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        FilledTonalButton(
+                                            onClick = { digitalSignatureTarget = "MANAGER" },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("امضای دستی مجدد", fontSize = 10.sp)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { editorManagerSignLauncher.launch("image/*") },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("تغییر عکس", fontSize = 10.sp)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { viewModel.saveSignatureAsDefault(true, viewModel.managerSignImgBase64) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("ثبت به عنوان پیش‌فرض", fontSize = 10.sp)
+                                        }
+
+                                        IconButton(
+                                            onClick = { viewModel.managerSignImgBase64 = "" },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Delete, contentDescription = "حذف", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                } else {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = { digitalSignatureTarget = "MANAGER" },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                            ),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.weight(1f).height(40.dp)
+                                        ) {
+                                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("امضای دیجیتال دستی (قلم)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { editorManagerSignLauncher.launch("image/*") },
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.weight(1f).height(40.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("بارگذاری عکس / مهر", fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Sales Signature Section
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
                                 OutlinedTextField(
                                     value = viewModel.salesSign,
                                     onValueChange = { viewModel.salesSign = it },
-                                    label = { Text("سمت امضاکننده دوم") },
+                                    label = { Text("سمت امضاکننده دوم (مثال: مسئول فروش / حسابداری)") },
                                     singleLine = true,
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                                         focusedLabelColor = MaterialTheme.colorScheme.primary
                                     ),
-                                    modifier = Modifier.weight(1f)
+                                    modifier = Modifier.fillMaxWidth()
                                 )
+
+                                if (viewModel.salesSignImgBase64.isNotBlank()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(90.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color.White)
+                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                                            .clickable { digitalSignatureTarget = "SALES" },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Base64Image(base64Str = viewModel.salesSignImgBase64, modifier = Modifier.fillMaxSize().padding(6.dp))
+                                    }
+
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        FilledTonalButton(
+                                            onClick = { digitalSignatureTarget = "SALES" },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("امضای دستی مجدد", fontSize = 10.sp)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { editorSalesSignLauncher.launch("image/*") },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("تغییر عکس", fontSize = 10.sp)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { viewModel.saveSignatureAsDefault(false, viewModel.salesSignImgBase64) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(13.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("ثبت به عنوان پیش‌فرض", fontSize = 10.sp)
+                                        }
+
+                                        IconButton(
+                                            onClick = { viewModel.salesSignImgBase64 = "" },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Delete, contentDescription = "حذف", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                } else {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = { digitalSignatureTarget = "SALES" },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                            ),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.weight(1f).height(40.dp)
+                                        ) {
+                                            Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("امضای دیجیتال دستی (قلم)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = { editorSalesSignLauncher.launch("image/*") },
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.weight(1f).height(40.dp)
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("بارگذاری عکس / مهر", fontSize = 11.sp)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -1762,6 +2010,31 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
             }
         }
     }
+    // Large Digital Signature Dialog for Editor
+    digitalSignatureTarget?.let { target ->
+        val isManager = target == "MANAGER"
+        val roleTitle = if (isManager) viewModel.managerSign.ifBlank { "مدیریت فروشگاه" } else viewModel.salesSign.ifBlank { "مسئول فروش / حسابداری" }
+        LargeDigitalSignatureDialog(
+            title = "امضای دیجیتال دستی ($roleTitle)",
+            initialSaveAsDefault = false,
+            showSaveAsDefaultCheckbox = true,
+            onDismiss = { digitalSignatureTarget = null },
+            onConfirm = { sigBase64, saveAsDefault ->
+                if (isManager) {
+                    viewModel.managerSignImgBase64 = sigBase64
+                    if (saveAsDefault) {
+                        viewModel.saveSignatureAsDefault(true, sigBase64)
+                    }
+                } else {
+                    viewModel.salesSignImgBase64 = sigBase64
+                    if (saveAsDefault) {
+                        viewModel.saveSignatureAsDefault(false, sigBase64)
+                    }
+                }
+                digitalSignatureTarget = null
+            }
+        )
+    }
 }
 
 /**
@@ -1815,7 +2088,7 @@ fun NormalItemRowCard(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Quick preset description buttons: صفحه، دیوارکوب، جزیره
+            // Quick preset description buttons: صفحه، دیوارکوب، جزیره، بین کابینتی، صفحه کابینت، قرنیز
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1827,15 +2100,19 @@ fun NormalItemRowCard(
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                listOf("صفحه", "دیوارکوب", "جزیره").forEach { word ->
+                listOf("صفحه", "دیوارکوب", "جزیره", "بین کابینتی", "قرنیز").forEach { word ->
+                    val isSelected = InvoiceItemHelper.stripWidthSuffix(item.description) == word
                     FilledTonalButton(
-                        onClick = { onUpdate(item.copy(description = word)) },
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        onClick = {
+                            val newDesc = InvoiceItemHelper.formatDescriptionWithWidth(word, item.width)
+                            onUpdate(item.copy(description = newDesc))
+                        },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.height(30.dp),
                         colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = if (item.description == word) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                            contentColor = if (item.description == word) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                         )
                     ) {
                         Text(word, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -1846,7 +2123,7 @@ fun NormalItemRowCard(
             OutlinedTextField(
                 value = item.description,
                 onValueChange = { onUpdate(item.copy(description = it)) },
-                label = { Text("شرح کالا (مثال: ابعاد پیشخوان آشپزخانه)") },
+                label = { Text("شرح کالا (مثال: صفحه به عرض 60)") },
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -1863,7 +2140,10 @@ fun NormalItemRowCard(
             ) {
                 Text("ابعاد و فی واحد سنگ:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FilledTonalButton(
-                    onClick = { onUpdate(item.copy(width = "60")) },
+                    onClick = {
+                        val newDesc = InvoiceItemHelper.formatDescriptionWithWidth(item.description, "60")
+                        onUpdate(item.copy(width = "60", description = newDesc))
+                    },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                     shape = RoundedCornerShape(8.dp),
                     modifier = Modifier.height(28.dp),
@@ -1884,7 +2164,10 @@ fun NormalItemRowCard(
             ) {
                 OutlinedTextField(
                     value = item.width,
-                    onValueChange = { onUpdate(item.copy(width = it)) },
+                    onValueChange = { newWidth ->
+                        val newDesc = InvoiceItemHelper.formatDescriptionWithWidth(item.description, newWidth)
+                        onUpdate(item.copy(width = newWidth, description = newDesc))
+                    },
                     label = { Text("عرض (cm)") },
                     placeholder = { Text("60") },
                     singleLine = true,
@@ -3404,6 +3687,7 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
     var sSign by remember { mutableStateOf("") }
     var mSignImgBase64 by remember { mutableStateOf("") }
     var sSignImgBase64 by remember { mutableStateOf("") }
+    var settingsSignatureTarget by remember { mutableStateOf<String?>(null) }
 
     // Synchronize states with the saved entity when loaded
     LaunchedEffect(configState) {
@@ -3583,7 +3867,14 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                         // Manager Sign
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             OutlinedTextField(
                                 value = mSign,
                                 onValueChange = { mSign = it },
@@ -3597,26 +3888,24 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Button(
-                                    onClick = { managerSignLauncher.launch("image/*") },
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer),
+                                    onClick = { settingsSignatureTarget = "MANAGER" },
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer),
                                     shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(36.dp)
+                                    modifier = Modifier.weight(1f).height(38.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("امضای دستی دیجیتال", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                OutlinedButton(
+                                    onClick = { managerSignLauncher.launch("image/*") },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f).height(38.dp)
                                 ) {
                                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("بارگذاری عکس امضاء اول", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-
-                                if (mSignImgBase64.isNotBlank()) {
-                                    OutlinedButton(
-                                        onClick = { mSignImgBase64 = "" },
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.height(36.dp)
-                                    ) {
-                                        Text("حذف تصویر", fontSize = 11.sp)
-                                    }
+                                    Text("بارگذاری عکس امضاء", fontSize = 11.sp)
                                 }
                             }
 
@@ -3627,10 +3916,23 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
                                         .height(100.dp)
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(Color.White)
-                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
+                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                                        .clickable { settingsSignatureTarget = "MANAGER" },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Base64Image(base64Str = mSignImgBase64, modifier = Modifier.fillMaxSize().padding(8.dp))
+                                }
+
+                                OutlinedButton(
+                                    onClick = { mSignImgBase64 = "" },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth().height(34.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("حذف امضای اول", fontSize = 11.sp)
                                 }
                             }
                         }
@@ -3638,7 +3940,14 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                         // Sales Sign
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             OutlinedTextField(
                                 value = sSign,
                                 onValueChange = { sSign = it },
@@ -3652,26 +3961,24 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Button(
-                                    onClick = { salesSignLauncher.launch("image/*") },
+                                    onClick = { settingsSignatureTarget = "SALES" },
                                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer),
                                     shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.height(36.dp)
+                                    modifier = Modifier.weight(1f).height(38.dp)
+                                ) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("امضای دستی دیجیتال", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                OutlinedButton(
+                                    onClick = { salesSignLauncher.launch("image/*") },
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f).height(38.dp)
                                 ) {
                                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("بارگذاری عکس امضاء دوم", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                }
-
-                                if (sSignImgBase64.isNotBlank()) {
-                                    OutlinedButton(
-                                        onClick = { sSignImgBase64 = "" },
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.height(36.dp)
-                                    ) {
-                                        Text("حذف تصویر", fontSize = 11.sp)
-                                    }
+                                    Text("بارگذاری عکس امضاء", fontSize = 11.sp)
                                 }
                             }
 
@@ -3682,10 +3989,23 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
                                         .height(100.dp)
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(Color.White)
-                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp)),
+                                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+                                        .clickable { settingsSignatureTarget = "SALES" },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Base64Image(base64Str = sSignImgBase64, modifier = Modifier.fillMaxSize().padding(8.dp))
+                                }
+
+                                OutlinedButton(
+                                    onClick = { sSignImgBase64 = "" },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth().height(34.dp)
+                                ) {
+                                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("حذف امضای دوم", fontSize = 11.sp)
                                 }
                             }
                         }
@@ -3766,6 +4086,24 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
             }
 
             item { Spacer(modifier = Modifier.height(20.dp)) }
+        }
+
+        settingsSignatureTarget?.let { target ->
+            val isManager = target == "MANAGER"
+            val roleTitle = if (isManager) mSign.ifBlank { "مدیریت فروشگاه" } else sSign.ifBlank { "مسئول فروش / حسابداری" }
+            LargeDigitalSignatureDialog(
+                title = "امضای دیجیتال دستی پیش‌فرض ($roleTitle)",
+                showSaveAsDefaultCheckbox = false,
+                onDismiss = { settingsSignatureTarget = null },
+                onConfirm = { sigBase64, _ ->
+                    if (isManager) {
+                        mSignImgBase64 = sigBase64
+                    } else {
+                        sSignImgBase64 = sigBase64
+                    }
+                    settingsSignatureTarget = null
+                }
+            )
         }
     }
 }
