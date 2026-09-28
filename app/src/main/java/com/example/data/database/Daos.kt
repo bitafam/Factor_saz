@@ -17,6 +17,12 @@ interface InvoiceDao {
     @Query("SELECT * FROM invoices WHERE id = :id LIMIT 1")
     suspend fun getInvoiceById(id: Int): InvoiceEntity?
 
+    @Query("SELECT COUNT(*) FROM invoices WHERE isDeleted = 0")
+    fun getActiveInvoiceCount(): Flow<Int>
+
+    @Query("SELECT COALESCE(SUM(totalAmount), 0.0) FROM invoices WHERE isDeleted = 0")
+    fun getTotalRevenue(): Flow<Double>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertInvoice(invoice: InvoiceEntity): Long
 

@@ -36,6 +36,7 @@ object InvoiceBackupManager {
 
     private const val ROOT_DIR_NAME = "IranQuartz"
     private const val BACKUP_DIR_NAME = "Backup faktors"
+    private const val FULL_BACKUP_DIR_NAME = "بکاپ کلی"
     private const val PDF_DIR_NAME = "faktors"
     private const val SUMMARY_DIR_NAME = "خلاصه فاکتورها"
     private const val LICENSE_DIR_NAME = "ActivatedLicenses"
@@ -55,6 +56,12 @@ object InvoiceBackupManager {
 
     fun getBackupFolder(): File {
         val f = File(getAppPublicRoot(), BACKUP_DIR_NAME)
+        if (!f.exists()) f.mkdirs()
+        return f
+    }
+
+    fun getFullBackupFolder(): File {
+        val f = File(getAppPublicRoot(), FULL_BACKUP_DIR_NAME)
         if (!f.exists()) f.mkdirs()
         return f
     }
@@ -163,7 +170,7 @@ object InvoiceBackupManager {
         devices: List<ActivatedDeviceEntity>
     ): File? {
         return try {
-            val folder = getBackupFolder()
+            val folder = getFullBackupFolder()
             val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val jalaliDate = JalaliCalendar.getTodayJalali().replace("/", "-")
             val fileName = "بکاپ_کامل_کوارتز_${jalaliDate}_${timeStamp}.qzb"
@@ -344,9 +351,17 @@ object InvoiceBackupManager {
     fun listAvailableBackups(): List<BackupFileInfo> {
         val list = mutableListOf<BackupFileInfo>()
         try {
-            val folder = getBackupFolder()
-            val files = folder.listFiles { _, name -> name.endsWith(".qzb") || name.endsWith(".json") } ?: emptyArray()
-            val sorted = files.sortedByDescending { it.lastModified() }
+            val fullFolder = getFullBackupFolder()
+            val singleFolder = getBackupFolder()
+            val filesList = mutableListOf<File>()
+            
+            fullFolder.listFiles { _, name -> name.endsWith(".qzb", ignoreCase = true) || name.endsWith(".json", ignoreCase = true) }?.let {
+                filesList.addAll(it)
+            }
+            singleFolder.listFiles { _, name -> name.endsWith(".qzb", ignoreCase = true) || name.endsWith(".json", ignoreCase = true) }?.let {
+                filesList.addAll(it)
+            }
+            val sorted = filesList.distinctBy { it.absolutePath }.sortedByDescending { it.lastModified() }
 
             val sdf = SimpleDateFormat("yyyy/MM/dd HH:mm", Locale.getDefault())
 

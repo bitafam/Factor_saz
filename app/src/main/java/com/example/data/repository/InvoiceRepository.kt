@@ -15,6 +15,8 @@ class InvoiceRepository(
 ) {
     val allInvoices: Flow<List<InvoiceEntity>> = invoiceDao.getAllInvoices()
     val deletedInvoices: Flow<List<InvoiceEntity>> = invoiceDao.getDeletedInvoices()
+    val totalRevenue: Flow<Double> = invoiceDao.getTotalRevenue()
+    val activeInvoiceCount: Flow<Int> = invoiceDao.getActiveInvoiceCount()
 
     suspend fun getAllInvoicesDirect(): List<InvoiceEntity> {
         return invoiceDao.getAllInvoicesDirect()

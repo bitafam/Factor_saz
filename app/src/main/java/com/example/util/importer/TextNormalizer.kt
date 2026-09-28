@@ -82,10 +82,12 @@ object TextNormalizer {
             .trim()
         if (raw.isBlank()) return null
 
-        // Replace Persian decimal separators ('/' or '،') with standard '.'
+        // Replace Persian decimal separators ('/' or '،') with standard '.' and dashes
         var normalized = raw
             .replace('،', '.')
             .replace('/', '.')
+            .replace('−', '-')
+            .replace('–', '-')
 
         // If it starts with '.' (e.g. ".57" or ".5"), prepend '0' -> "0.57"
         if (normalized.startsWith(".")) {

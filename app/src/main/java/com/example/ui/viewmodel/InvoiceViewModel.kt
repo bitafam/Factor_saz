@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -101,8 +102,11 @@ class InvoiceViewModel(
             val normalSum = normalItems.sumOf { it.totalAmount }
             val simpleSum = simpleItems.sumOf { it.totalAmount }
             val baseSum = normalSum + simpleSum
-            val percentSum = percentageItems.sumOf { (baseSum * (it.percentageStr.toDoubleOrNull() ?: 0.0)) / 100.0 }
-            return baseSum + percentSum
+            val percentSum = percentageItems.sumOf {
+                val pct = com.example.util.importer.TextNormalizer.parseNumber(it.percentageStr) ?: 0.0
+                ((baseSum * pct) / 100.0).let { kotlin.math.round(it) }
+            }
+            return (baseSum + percentSum).let { kotlin.math.round(it) }
         }
 
     // Input States for Activation Key
@@ -119,6 +123,87 @@ class InvoiceViewModel(
     var backupOperationMessage by mutableStateOf<String?>(null)
     private val _availableBackups = MutableStateFlow<List<com.example.util.BackupFileInfo>>(emptyList())
     val availableBackups: StateFlow<List<com.example.util.BackupFileInfo>> = _availableBackups.asStateFlow()
+
+    val totalRevenueFlow: StateFlow<Double> = repository.totalRevenue.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        0.0
+    )
+    val totalCountFlow: StateFlow<Int> = repository.activeInvoiceCount.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        0
+    )
+
+    private fun formatPriceSuggestion(numStr: String): String {
+        return try {
+            val n = numStr.toLongOrNull() ?: return numStr
+            java.text.DecimalFormat("#,###").format(n)
+        } catch (e: Exception) { numStr }
+    }
+
+    val suggestedPrices: StateFlow<List<String>> = repository.allInvoices.map { invoices: List<InvoiceEntity> ->
+        val priceCounts = mutableMapOf<String, Int>()
+        val recentList = mutableListOf<String>()
+        for (inv in invoices) {
+            val items = ItemJsonConverter.deserializeInvoiceItems(inv.itemsJson)
+            for (item in items) {
+                val p = item.price60cm.trim().replace(",", "").replace(" ", "")
+                if (p.isNotBlank() && p != "0") {
+                    priceCounts[p] = (priceCounts[p] ?: 0) + 1
+                    if (!recentList.contains(p)) {
+                        recentList.add(p)
+                    }
+                }
+            }
+        }
+        val topFrequent = priceCounts.entries.sortedByDescending { it.value }.map { it.key }.take(3)
+        val topRecent = recentList.take(3)
+        val combined = (topRecent + topFrequent).distinct().take(5)
+        if (combined.isEmpty()) {
+            listOf("115,000,000", "95,000,000", "125,000,000")
+        } else {
+            combined.map { formatPriceSuggestion(it) }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("115,000,000", "95,000,000", "125,000,000"))
+
+    val recentFrequentPrices: StateFlow<List<String>> = suggestedPrices
+
+    fun isDuplicateInvoice(newInv: InvoiceEntity, existingList: List<InvoiceEntity>): Boolean {
+        val newNo = newInv.invoiceNo.trim()
+        val newBuyer = newInv.buyerName.trim()
+        val newDate = newInv.invoiceDate.trim()
+        val newTotal = newInv.totalAmount
+
+        return existingList.any { existing ->
+            if (existing.isDeleted) return@any false
+            val exNo = existing.invoiceNo.trim()
+            val exBuyer = existing.buyerName.trim()
+            val exDate = existing.invoiceDate.trim()
+            val exTotal = existing.totalAmount
+
+            // Match 1: Same invoice number (if not generic/blank) and same buyer
+            val noMatch = exNo.isNotBlank() && !exNo.startsWith("INV-") && 
+                    exNo.equals(newNo, ignoreCase = true) &&
+                    exBuyer.isNotBlank() && exBuyer.equals(newBuyer, ignoreCase = true)
+            if (noMatch) return@any true
+
+            // Match 2: Exact buyer, date, and total amount
+            val exactMatch = exBuyer.isNotBlank() && exBuyer.equals(newBuyer, ignoreCase = true) &&
+                    exDate.isNotBlank() && exDate == newDate &&
+                    kotlin.math.abs(exTotal - newTotal) < 1.0
+            if (exactMatch) return@any true
+
+            // Match 3: Same items JSON content, buyer, and total amount
+            if (exBuyer.isNotBlank() && exBuyer.equals(newBuyer, ignoreCase = true) &&
+                existing.itemsJson.isNotBlank() && existing.itemsJson == newInv.itemsJson &&
+                kotlin.math.abs(exTotal - newTotal) < 1.0) {
+                return@any true
+            }
+
+            false
+        }
+    }
 
     init {
         refreshAvailableBackups()
@@ -163,13 +248,17 @@ class InvoiceViewModel(
                 }
             }
 
-            // Sync/Read backups in public DOCUMENTS directory to auto-restore all records upon reinstall
+            // Sync/Read backups in public DOCUMENTS directory to auto-restore only if database is completely empty (reinstall)
             try {
-                val backups = InvoiceBackupManager.loadAllBackups()
-                for (backup in backups) {
-                    val existing = repository.getInvoiceById(backup.id)
-                    if (existing == null) {
-                        repository.insertInvoice(backup)
+                val existingInvoices = repository.getAllInvoicesDirect().toMutableList()
+                if (existingInvoices.isEmpty()) {
+                    val backups = InvoiceBackupManager.loadAllBackups()
+                    for (backup in backups) {
+                        if (!isDuplicateInvoice(backup, existingInvoices)) {
+                            val clean = backup.copy(id = 0, isDeleted = false)
+                            val newId = repository.insertInvoice(clean)
+                            existingInvoices.add(clean.copy(id = newId.toInt()))
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -1032,17 +1121,16 @@ class InvoiceViewModel(
         }
 
         var importedInvoicesCount = 0
-        val existingList = repository.getAllInvoicesDirect()
+        var duplicatesCount = 0
+        val existingList = repository.getAllInvoicesDirect().toMutableList()
         for (inv in result.invoices) {
-            val match = existingList.find { it.invoiceNo.isNotBlank() && it.invoiceNo == inv.invoiceNo && it.buyerName == inv.buyerName && it.invoiceDate == inv.invoiceDate }
-            val cleanInv = if (match != null) {
-                inv.copy(id = match.id, isDeleted = false)
-            } else {
-                inv.copy(id = 0, isDeleted = false)
+            if (isDuplicateInvoice(inv, existingList)) {
+                duplicatesCount++
+                continue
             }
-            repository.insertInvoice(cleanInv)
-            // Re-sync backup file locally
-            InvoiceBackupManager.saveInvoiceBackup(cleanInv)
+            val cleanInv = inv.copy(id = 0, isDeleted = false)
+            val newId = repository.insertInvoice(cleanInv)
+            existingList.add(cleanInv.copy(id = newId.toInt()))
             importedInvoicesCount++
         }
 
@@ -1087,49 +1175,80 @@ class InvoiceViewModel(
             isBackupOperationLoading = false
             val configMsg = if (result.configRestored) " و مشخصات و امضاهای فروشگاه" else ""
             val licenseMsg = if (result.devicesCount > 0) " و ${result.devicesCount} لایسنس همکاران" else ""
-            backupOperationMessage = "بازیابی با موفقیت کامل انجام شد:\n• $importedInvoicesCount فاکتور بازیابی گردید.\n$configMsg$licenseMsg"
+            val dupMsg = if (duplicatesCount > 0) "\n($duplicatesCount فاکتور تکراری شناسایی و رد شد)" else ""
+            backupOperationMessage = "بازیابی با موفقیت انجام شد:\n• $importedInvoicesCount فاکتور جدید بازیابی گردید.$dupMsg$configMsg$licenseMsg"
             Toast.makeText(context, "✅ بازیابی موفقیت‌آمیز بود ($importedInvoicesCount فاکتور)", Toast.LENGTH_LONG).show()
         }
     }
 
     /**
-     * Imports a single .qzb or json invoice backup file and adds it to the saved list.
+     * Imports one or multiple user-selected .qzb files, verifies duplicates, and adds only new invoices.
+     * Prevents making duplicate file copies in the backup directory.
      */
-    fun importSingleQzbFile(context: Context, uri: android.net.Uri) {
+    fun importQzbFiles(context: Context, uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
             isBackupOperationLoading = true
             try {
-                val json = context.contentResolver.openInputStream(uri)?.use { 
-                    java.io.BufferedReader(java.io.InputStreamReader(it, Charsets.UTF_8)).readText() 
-                } ?: ""
+                val existingInvoices = repository.getAllInvoicesDirect().toMutableList()
+                var addedCount = 0
+                var duplicateCount = 0
 
-                val parseResult = InvoiceBackupManager.parseBackupContent(json)
-                if (parseResult.success && parseResult.invoices.isNotEmpty()) {
-                    var count = 0
-                    for (inv in parseResult.invoices) {
-                        val cleanInv = inv.copy(id = 0, isDeleted = false)
-                        repository.insertInvoice(cleanInv)
-                        InvoiceBackupManager.saveInvoiceBackup(cleanInv)
-                        count++
+                for (uri in uris) {
+                    val json = InvoiceBackupManager.readFromUri(context, uri) ?: continue
+                    val parseResult = InvoiceBackupManager.parseBackupContent(json)
+                    if (parseResult.success && parseResult.invoices.isNotEmpty()) {
+                        for (inv in parseResult.invoices) {
+                            if (isDuplicateInvoice(inv, existingInvoices)) {
+                                duplicateCount++
+                            } else {
+                                val cleanInv = inv.copy(id = 0, isDeleted = false)
+                                val newId = repository.insertInvoice(cleanInv)
+                                existingInvoices.add(cleanInv.copy(id = newId.toInt()))
+                                addedCount++
+                            }
+                        }
                     }
-                    refreshAvailableBackups()
-                    withContext(Dispatchers.Main) {
-                        isBackupOperationLoading = false
-                        Toast.makeText(context, "✅ $count فاکتور با موفقیت به لیست اضافه شد", Toast.LENGTH_LONG).show()
+                }
+
+                refreshAvailableBackups()
+
+                withContext(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    val msg = when {
+                        addedCount > 0 && duplicateCount > 0 ->
+                            "✅ $addedCount فاکتور جدید با موفقیت اضافه شد.\n($duplicateCount فاکتور تکراری شناسایی و رد شد)"
+                        addedCount > 0 ->
+                            "✅ $addedCount فاکتور با موفقیت به برنامه اضافه شد."
+                        duplicateCount > 0 ->
+                            "تمامی فاکتورهای انتخابی ($duplicateCount عدد) تکراری بودند و قبلاً در برنامه ثبت شده‌اند."
+                        else ->
+                            "فایل‌های انتخابی معتبر نبودند یا فاکتوری در آن‌ها یافت نشد."
                     }
-                } else {
-                    withContext(Dispatchers.Main) {
-                        isBackupOperationLoading = false
-                        Toast.makeText(context, "فایل انتخابی معتبر نیست یا فاکتوری در آن یافت نشد", Toast.LENGTH_LONG).show()
-                    }
+                    backupOperationMessage = msg
+                    Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     isBackupOperationLoading = false
-                    Toast.makeText(context, "خطا در خواندن فایل: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "خطا در افزودن فاکتورها: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
+    }
+
+    /**
+     * Imports a single .qzb invoice backup file (wrapper for importQzbFiles).
+     */
+    fun importSingleQzbFile(context: Context, uri: android.net.Uri) {
+        importQzbFiles(context, listOf(uri))
+    }
+
+    /**
+     * Reads and restores multiple user-selected .qzb files (wrapper for importQzbFiles).
+     */
+    fun restoreFromMultipleUris(context: Context, uris: List<android.net.Uri>) {
+        importQzbFiles(context, uris)
     }
 
     fun deleteBackupFile(file: java.io.File) {
@@ -1146,7 +1265,7 @@ class InvoiceViewModel(
     }
 
     /**
-     * Reads and restores all .qzb invoices from a user-selected folder (e.g. Documents/IranQuartz/Backup faktors).
+     * Reads and restores all .qzb invoices from a user-selected folder with duplicate checking.
      */
     fun restoreFromFolderTree(context: Context, treeUri: android.net.Uri) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -1160,27 +1279,33 @@ class InvoiceViewModel(
                 }
 
                 val foundInvoices = InvoiceBackupManager.restoreFromTreeUri(context, treeUri)
+                val existingInvoices = repository.getAllInvoicesDirect().toMutableList()
                 var importedCount = 0
+                var duplicatesCount = 0
+
                 for (inv in foundInvoices) {
-                    val existing = repository.getInvoiceById(inv.id)
-                    if (existing == null) {
-                        repository.insertInvoice(inv)
-                        importedCount++
+                    if (isDuplicateInvoice(inv, existingInvoices)) {
+                        duplicatesCount++
                     } else {
-                        repository.updateInvoice(inv)
+                        val cleanInv = inv.copy(id = 0, isDeleted = false)
+                        val newId = repository.insertInvoice(cleanInv)
+                        existingInvoices.add(cleanInv.copy(id = newId.toInt()))
                         importedCount++
                     }
-                    InvoiceBackupManager.saveInvoiceBackup(inv)
                 }
                 refreshAvailableBackups()
 
                 withContext(Dispatchers.Main) {
                     isBackupOperationLoading = false
+                    val dupMsg = if (duplicatesCount > 0) "\n($duplicatesCount فاکتور تکراری رد شد)" else ""
                     if (importedCount > 0) {
-                        backupOperationMessage = "✅ بازیابی پوشه با موفقیت انجام شد:\n$importedCount فاکتور (.qzb) از پوشه انتخابی خوانده و به لیست فاکتورهای شما اضافه شد."
-                        Toast.makeText(context, "$importedCount فاکتور با موفقیت به لیست اضافه شد", Toast.LENGTH_LONG).show()
+                        backupOperationMessage = "✅ بازیابی پوشه با موفقیت انجام شد:\n$importedCount فاکتور جدید به لیست اضافه شد.$dupMsg"
+                        Toast.makeText(context, "$importedCount فاکتور با موفقیت اضافه شد", Toast.LENGTH_LONG).show()
+                    } else if (duplicatesCount > 0) {
+                        backupOperationMessage = "تمام $duplicatesCount فاکتور یافت شده در این پوشه، از قبل در برنامه وجود دارند و تکراری بودند."
+                        Toast.makeText(context, "فاکتور جدیدی یافت نشد (تمام موارد تکراری بودند)", Toast.LENGTH_LONG).show()
                     } else {
-                        backupOperationMessage = "هیچ فایل فاکتور با پسوند .qzb در این پوشه یافت نشد. لطفاً مطمئن شوید پوشه Documents/IranQuartz یا Backup faktors را انتخاب کرده‌اید."
+                        backupOperationMessage = "هیچ فایل فاکتور با پسوند .qzb در این پوشه یافت نشد."
                         Toast.makeText(context, "فایل فاکتوری در این پوشه یافت نشد", Toast.LENGTH_LONG).show()
                     }
                 }
@@ -1188,41 +1313,6 @@ class InvoiceViewModel(
                 withContext(Dispatchers.Main) {
                     isBackupOperationLoading = false
                     Toast.makeText(context, "خطا در خواندن پوشه: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-    }
-
-    /**
-     * Reads and restores multiple user-selected .qzb files.
-     */
-    fun restoreFromMultipleUris(context: Context, uris: List<android.net.Uri>) {
-        if (uris.isEmpty()) return
-        viewModelScope.launch(Dispatchers.IO) {
-            isBackupOperationLoading = true
-            try {
-                val foundInvoices = InvoiceBackupManager.restoreFromMultipleUris(context, uris)
-                var importedCount = 0
-                for (inv in foundInvoices) {
-                    repository.insertInvoice(inv)
-                    InvoiceBackupManager.saveInvoiceBackup(inv)
-                    importedCount++
-                }
-                refreshAvailableBackups()
-
-                withContext(Dispatchers.Main) {
-                    isBackupOperationLoading = false
-                    if (importedCount > 0) {
-                        backupOperationMessage = "✅ $importedCount فاکتور انتخابی با موفقیت به لیست فاکتورهای شما اضافه شد."
-                        Toast.makeText(context, "$importedCount فاکتور با موفقیت بازیابی شد", Toast.LENGTH_LONG).show()
-                    } else {
-                        Toast.makeText(context, "فایل‌های انتخاب‌شده معتبر نبودند", Toast.LENGTH_LONG).show()
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    isBackupOperationLoading = false
-                    Toast.makeText(context, "خطا در بازیابی فایل‌ها: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }

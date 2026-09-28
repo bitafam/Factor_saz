@@ -823,6 +823,7 @@ fun AdminPanelScreen(viewModel: InvoiceViewModel) {
 @Composable
 fun EditorScreen(viewModel: InvoiceViewModel) {
     val context = LocalContext.current
+    val suggestedPricesList by viewModel.suggestedPrices.collectAsStateWithLifecycle()
     var showSimpleAddDialog by remember { mutableStateOf(false) }
     var showPercentageAddDialog by remember { mutableStateOf(false) }
     var editingSimpleIndex by remember { mutableStateOf<Int?>(null) }
@@ -1123,6 +1124,7 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
                     NormalItemRowCard(
                         index = index,
                         item = item,
+                        suggestedPrices = suggestedPricesList,
                         onUpdate = { updated -> viewModel.updateNormalItem(index, updated) },
                         onDelete = { viewModel.removeNormalItemAt(index) }
                     )
@@ -1768,6 +1770,7 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
 fun NormalItemRowCard(
     index: Int,
     item: ComposeInvoiceItem,
+    suggestedPrices: List<String> = emptyList(),
     onUpdate: (ComposeInvoiceItem) -> Unit,
     onDelete: () -> Unit
 ) {
@@ -1811,6 +1814,34 @@ fun NormalItemRowCard(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+            // Quick preset description buttons: صفحه، دیوارکوب، جزیره
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "شرح سریع:",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                listOf("صفحه", "دیوارکوب", "جزیره").forEach { word ->
+                    FilledTonalButton(
+                        onClick = { onUpdate(item.copy(description = word)) },
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(30.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = if (item.description == word) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (item.description == word) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                        )
+                    ) {
+                        Text(word, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
             OutlinedTextField(
                 value = item.description,
                 onValueChange = { onUpdate(item.copy(description = it)) },
@@ -1822,6 +1853,29 @@ fun NormalItemRowCard(
                 ),
                 modifier = Modifier.fillMaxWidth()
             )
+
+            // Quick Button for Width 60
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("ابعاد و فی واحد سنگ:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FilledTonalButton(
+                    onClick = { onUpdate(item.copy(width = "60")) },
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.height(28.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = if (item.width == "60") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                        contentColor = if (item.width == "60") MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(13.dp))
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text("عرض ۶۰ (پیش‌فرض)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1868,6 +1922,25 @@ fun NormalItemRowCard(
                     ),
                     modifier = Modifier.weight(1.5f)
                 )
+            }
+
+            // Quick Frequent/Recent Price Chips
+            if (suggestedPrices.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("فی‌های پرکاربرد/اخیر:", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    suggestedPrices.forEach { price ->
+                        FilterChip(
+                            selected = item.price60cm.replace(",", "").trim() == price.replace(",", "").trim(),
+                            onClick = { onUpdate(item.copy(price60cm = formatInputWithCommas(price))) },
+                            label = { Text(price, fontSize = 10.sp, fontWeight = FontWeight.Medium) },
+                            modifier = Modifier.height(28.dp)
+                        )
+                    }
+                }
             }
 
             // Real-time Calculative Feedback Panels
@@ -2049,6 +2122,8 @@ fun PercentageItemRowCard(
 fun HistoryScreen(viewModel: InvoiceViewModel) {
     val context = LocalContext.current
     val savedList by viewModel.savedInvoices.collectAsStateWithLifecycle()
+    val totalRevenueFlow by viewModel.totalRevenueFlow.collectAsStateWithLifecycle()
+    val totalCountFlow by viewModel.totalCountFlow.collectAsStateWithLifecycle()
     var searchQuery by remember { mutableStateOf("") }
 
     val coworkerPackagePickerLauncher = rememberLauncherForActivityResult(
@@ -2059,11 +2134,11 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
         }
     }
 
-    val singleQzbPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            viewModel.importSingleQzbFile(context, uri)
+    val multiQzbPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.importQzbFiles(context, uris)
         }
     }
 
@@ -2080,12 +2155,10 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
         }
     }
 
-    val totalSum = remember(savedList) { savedList.sumOf { it.totalAmount } }
-
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("فاکتورهای ذخیره شده (${savedList.size})", fontSize = 15.sp, fontWeight = FontWeight.Bold) },
+                title = { Text("فاکتورهای ذخیره شده (${totalCountFlow})", fontSize = 15.sp, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = { viewModel.navigateTo("EDITOR") }) {
                         Icon(imageVector = Icons.Default.Close, contentDescription = "بازگشت")
@@ -2147,7 +2220,7 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                         )
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = formatMoney(totalSum),
+                                text = formatMoney(totalRevenueFlow),
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary
@@ -2179,7 +2252,7 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
 
                         Button(
                             onClick = {
-                                singleQzbPickerLauncher.launch(
+                                multiQzbPickerLauncher.launch(
                                     arrayOf("*/*", "application/json", "application/octet-stream")
                                 )
                             },
@@ -2188,11 +2261,11 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                                 contentColor = MaterialTheme.colorScheme.onSecondary
                             ),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1.1f).height(38.dp)
+                            modifier = Modifier.weight(1.2f).height(38.dp)
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text("افزودن تکی .qzb", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("افزودن فاکتور (.qzb)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
 
                         Button(
@@ -2613,8 +2686,8 @@ fun AccountScreen(viewModel: InvoiceViewModel) {
         }
     }
 
-    val totalCount = savedList.size
-    val totalRevenue = savedList.sumOf { it.totalAmount }
+    val totalCount by viewModel.totalCountFlow.collectAsStateWithLifecycle()
+    val totalRevenue by viewModel.totalRevenueFlow.collectAsStateWithLifecycle()
     val averageValue = if (totalCount > 0) totalRevenue / totalCount else 0.0
 
     Scaffold(

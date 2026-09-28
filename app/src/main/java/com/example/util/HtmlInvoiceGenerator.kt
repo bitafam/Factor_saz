@@ -316,8 +316,8 @@ object HtmlInvoiceGenerator {
         val baseTotal = calculatedTotal
         val percentageItems = ItemJsonConverter.deserializePercentageItems(invoice.percentageItemsJson)
         for (item in percentageItems) {
-            val pct = item.percentageStr.toDoubleOrNull() ?: 0.0
-            val percentAmount = (baseTotal * pct) / 100.0
+            val pct = com.example.util.importer.TextNormalizer.parseNumber(item.percentageStr) ?: 0.0
+            val percentAmount = ((baseTotal * pct) / 100.0).let { kotlin.math.round(it) }
             calculatedTotal += percentAmount
 
             sb.append("""
