@@ -140,10 +140,34 @@ object InvoiceBackupManager {
             invObj.put("isDeleted", inv.isDeleted)
             invObj.put("managerSignImgBase64", inv.managerSignImgBase64)
             invObj.put("salesSignImgBase64", inv.salesSignImgBase64)
+            invObj.put("cloudHtmlUrl", inv.cloudHtmlUrl)
+            invObj.put("attachmentsJson", inv.attachmentsJson)
             invArray.put(invObj)
         }
         rootObj.put("invoices", invArray)
         rootObj.put("invoicesCount", invoices.size)
+
+        // Store App Config & ArvanCloud credentials in Full Package
+        if (config != null) {
+            val confObj = JSONObject()
+            confObj.put("defaultSellerName", config.defaultSellerName)
+            confObj.put("defaultSellerPhone", config.defaultSellerPhone)
+            confObj.put("defaultSellerAddress", config.defaultSellerAddress)
+            confObj.put("defaultInvoiceTitle", config.defaultInvoiceTitle)
+            confObj.put("defaultInvoiceSubtitle", config.defaultInvoiceSubtitle)
+            confObj.put("defaultManagerSign", config.defaultManagerSign)
+            confObj.put("defaultSalesSign", config.defaultSalesSign)
+            confObj.put("defaultManagerSignImg", config.defaultManagerSignImg)
+            confObj.put("defaultSalesSignImg", config.defaultSalesSignImg)
+            confObj.put("licensePrice", config.licensePrice)
+            confObj.put("arvanEndpoint", config.arvanEndpoint)
+            confObj.put("arvanBucket", config.arvanBucket)
+            confObj.put("arvanAccessKey", config.arvanAccessKey)
+            confObj.put("arvanSecretKey", config.arvanSecretKey)
+            confObj.put("arvanCustomDomain", config.arvanCustomDomain)
+            confObj.put("arvanAutoSync", config.arvanAutoSync)
+            rootObj.put("config", confObj)
+        }
 
         // Activated Devices Array
         val devArray = JSONArray()
@@ -237,7 +261,9 @@ object InvoiceBackupManager {
                         createdAt = invObj.optLong("createdAt", System.currentTimeMillis()),
                         isDeleted = invObj.optBoolean("isDeleted", false),
                         managerSignImgBase64 = invObj.optString("managerSignImgBase64", ""),
-                        salesSignImgBase64 = invObj.optString("salesSignImgBase64", "")
+                        salesSignImgBase64 = invObj.optString("salesSignImgBase64", ""),
+                        cloudHtmlUrl = invObj.optString("cloudHtmlUrl", ""),
+                        attachmentsJson = invObj.optString("attachmentsJson", "[]")
                     )
                     val calcTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(entity)
                     invoicesList.add(if (calcTotal > 0.0) entity.copy(totalAmount = calcTotal) else entity)
@@ -258,7 +284,13 @@ object InvoiceBackupManager {
                         defaultSalesSign = confObj.optString("defaultSalesSign", ""),
                         defaultManagerSignImg = confObj.optString("defaultManagerSignImg", ""),
                         defaultSalesSignImg = confObj.optString("defaultSalesSignImg", ""),
-                        licensePrice = confObj.optString("licensePrice", "۵,۰۰۰,۰۰۰ تومان")
+                        licensePrice = confObj.optString("licensePrice", "۵,۰۰۰,۰۰۰ تومان"),
+                        arvanEndpoint = confObj.optString("arvanEndpoint", "s3.ir-thr-at1.arvanstorage.ir"),
+                        arvanBucket = confObj.optString("arvanBucket", ""),
+                        arvanAccessKey = confObj.optString("arvanAccessKey", ""),
+                        arvanSecretKey = confObj.optString("arvanSecretKey", ""),
+                        arvanCustomDomain = confObj.optString("arvanCustomDomain", ""),
+                        arvanAutoSync = confObj.optBoolean("arvanAutoSync", true)
                     )
                 }
 
@@ -437,6 +469,8 @@ object InvoiceBackupManager {
         obj.put("isDeleted", invoice.isDeleted)
         obj.put("managerSignImgBase64", invoice.managerSignImgBase64)
         obj.put("salesSignImgBase64", invoice.salesSignImgBase64)
+        obj.put("cloudHtmlUrl", invoice.cloudHtmlUrl)
+        obj.put("attachmentsJson", invoice.attachmentsJson)
         return obj.toString(4)
     }
 
@@ -466,7 +500,9 @@ object InvoiceBackupManager {
             createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
             isDeleted = obj.optBoolean("isDeleted", false),
             managerSignImgBase64 = obj.optString("managerSignImgBase64", ""),
-            salesSignImgBase64 = obj.optString("salesSignImgBase64", "")
+            salesSignImgBase64 = obj.optString("salesSignImgBase64", ""),
+            cloudHtmlUrl = obj.optString("cloudHtmlUrl", ""),
+            attachmentsJson = obj.optString("attachmentsJson", "[]")
         )
         val calcTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(entity)
         return if (calcTotal > 0.0) entity.copy(totalAmount = calcTotal) else entity

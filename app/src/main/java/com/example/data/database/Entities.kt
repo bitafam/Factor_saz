@@ -25,7 +25,9 @@ data class InvoiceEntity(
     val createdAt: Long = System.currentTimeMillis(),
     val isDeleted: Boolean = false,
     val managerSignImgBase64: String = "",
-    val salesSignImgBase64: String = ""
+    val salesSignImgBase64: String = "",
+    val cloudHtmlUrl: String = "",
+    val attachmentsJson: String = "[]"
 )
 
 @Entity(tableName = "app_config")
@@ -43,7 +45,13 @@ data class ConfigEntity(
     val defaultManagerSign: String = "",
     val defaultSalesSign: String = "",
     val defaultManagerSignImg: String = "",
-    val defaultSalesSignImg: String = ""
+    val defaultSalesSignImg: String = "",
+    val arvanEndpoint: String = "s3.ir-thr-at1.arvanstorage.ir",
+    val arvanBucket: String = "",
+    val arvanAccessKey: String = "",
+    val arvanSecretKey: String = "",
+    val arvanCustomDomain: String = "",
+    val arvanAutoSync: Boolean = true
 )
 
 @Entity(tableName = "activated_devices")

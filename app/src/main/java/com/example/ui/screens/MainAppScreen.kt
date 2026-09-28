@@ -4,6 +4,7 @@ package com.example.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
@@ -46,6 +47,9 @@ import android.net.Uri
 import com.example.util.JalaliCalendar
 import com.example.util.InvoiceItemHelper
 import com.example.ui.components.LargeDigitalSignatureDialog
+import com.example.ui.components.InvoiceAttachmentSection
+import com.example.ui.components.BatchSyncProgressDialog
+import com.example.ui.screens.CloudFileManagerScreen
 import com.example.data.database.InvoiceEntity
 import com.example.data.model.*
 import com.example.ui.viewmodel.InvoiceViewModel
@@ -166,12 +170,18 @@ fun AppNavigationRoot(viewModel: InvoiceViewModel) {
                         "HISTORY" -> HistoryScreen(viewModel)
                         "ACCOUNT" -> AccountScreen(viewModel)
                         "SETTINGS" -> SettingsScreen(viewModel)
+                        "CLOUD_FILE_MANAGER" -> CloudFileManagerScreen(viewModel)
                         else -> EditorScreen(viewModel)
                     }
                 }
             }
             // Persistent Import Dialog
             InvoiceImportDialog(viewModel = viewModel)
+
+            // Batch Queue Cloud Sync Progress Dialog
+            if (viewModel.isBatchSyncActive) {
+                BatchSyncProgressDialog(viewModel = viewModel)
+            }
         }
     }
 }
@@ -1541,7 +1551,12 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
                     }
                 }
 
-                // 6. Visual Invoice Total Ledger Card
+                // 6. Invoice Attachments & Supporting Documents Card (Receipts, Plans, Images)
+                item {
+                    InvoiceAttachmentSection(viewModel = viewModel)
+                }
+
+                // 7. Visual Invoice Total Ledger Card
                 item {
                     Card(
                         shape = RoundedCornerShape(12.dp),
@@ -2672,7 +2687,8 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                             invoice = invoice,
                             onLoad = { viewModel.loadInvoice(invoice) },
                             onDelete = { viewModel.deleteInvoice(invoice) },
-                            onShare = { viewModel.shareInvoice(context, invoice) }
+                            onShare = { viewModel.shareInvoice(context, invoice) },
+                            onUploadToCloud = { viewModel.uploadSingleInvoiceToCloud(invoice) }
                         )
                     }
                 }
@@ -2766,8 +2782,14 @@ fun HistoryInvoiceCard(
     invoice: InvoiceEntity,
     onLoad: () -> Unit,
     onDelete: () -> Unit,
-    onShare: () -> Unit
+    onShare: () -> Unit,
+    onUploadToCloud: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val attachments = remember(invoice.attachmentsJson) {
+        com.example.data.database.ItemJsonConverter.deserializeAttachments(invoice.attachmentsJson)
+    }
+
     Card(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -2797,13 +2819,33 @@ fun HistoryInvoiceCard(
                     )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = invoice.invoiceDate, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    if (attachments.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer
+                        ) {
+                            Text(
+                                text = "📎 ${attachments.size} پیوست",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(text = invoice.invoiceDate, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
                 }
             }
 
@@ -2860,40 +2902,73 @@ fun HistoryInvoiceCard(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = onShare,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Share, contentDescription = "اشتراک فاکتور", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                // Online Cloud HTML Link Button
+                if (invoice.cloudHtmlUrl.isNotBlank()) {
+                    FilledTonalButton(
+                        onClick = {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(invoice.cloudHtmlUrl))
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "خطا در باز کردن لینک فاکتور: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("مشاهده فاکتور (HTML)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onUploadToCloud,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("ثبت در صندوقچه", fontSize = 10.sp)
+                    }
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
-
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(36.dp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(imageVector = Icons.Default.Delete, contentDescription = "حذف رکورد", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
-                }
+                    IconButton(
+                        onClick = onShare,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Share, contentDescription = "اشتراک فاکتور", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                    }
 
-                Spacer(modifier = Modifier.width(12.dp))
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Delete, contentDescription = "حذف رکورد", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                    }
 
-                Button(
-                    onClick = onLoad,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary,
-                        contentColor = MaterialTheme.colorScheme.onSecondary
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(start = 16.dp, top = 6.dp, end = 16.dp, bottom = 6.dp),
-                    modifier = Modifier.height(32.dp)
-                ) {
-                    Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("بارگذاری و ویرایش", fontSize = 11.sp)
+                    Button(
+                        onClick = onLoad,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary,
+                            contentColor = MaterialTheme.colorScheme.onSecondary
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("ویرایش", fontSize = 10.sp)
+                    }
                 }
             }
         }
@@ -3689,6 +3764,14 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
     var sSignImgBase64 by remember { mutableStateOf("") }
     var settingsSignatureTarget by remember { mutableStateOf<String?>(null) }
 
+    var arvanEndpointInput by remember { mutableStateOf(viewModel.arvanEndpoint) }
+    var arvanBucketInput by remember { mutableStateOf(viewModel.arvanBucket) }
+    var arvanAccessKeyInput by remember { mutableStateOf(viewModel.arvanAccessKey) }
+    var arvanSecretKeyInput by remember { mutableStateOf(viewModel.arvanSecretKey) }
+    var arvanCustomDomainInput by remember { mutableStateOf(viewModel.arvanCustomDomain) }
+    var arvanAutoSyncInput by remember { mutableStateOf(viewModel.arvanAutoSync) }
+    var isSecretVisible by remember { mutableStateOf(false) }
+
     // Synchronize states with the saved entity when loaded
     LaunchedEffect(configState) {
         configState?.let {
@@ -3701,6 +3784,12 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
             sSign = it.defaultSalesSign
             mSignImgBase64 = it.defaultManagerSignImg
             sSignImgBase64 = it.defaultSalesSignImg
+            arvanEndpointInput = it.arvanEndpoint.ifBlank { "s3.ir-thr-at1.arvanstorage.ir" }
+            arvanBucketInput = it.arvanBucket
+            arvanAccessKeyInput = it.arvanAccessKey
+            arvanSecretKeyInput = it.arvanSecretKey
+            arvanCustomDomainInput = it.arvanCustomDomain
+            arvanAutoSyncInput = it.arvanAutoSync
         }
     }
 
@@ -4013,6 +4102,209 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
                 }
             }
 
+            // ArvanCloud Object Storage Configuration Card
+            item {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Place,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "صندوقچه ابری آروان کلود (ArvanCloud)",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = "ذخیره خودکار نسخه HTML و تصاویر ضمیمه در صندوقچه",
+                                        fontSize = 10.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                        // Endpoint
+                        OutlinedTextField(
+                            value = arvanEndpointInput,
+                            onValueChange = { arvanEndpointInput = it },
+                            label = { Text("آدرس سرور (Endpoint)") },
+                            placeholder = { Text("s3.ir-thr-at1.arvanstorage.ir") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Bucket Name
+                        OutlinedTextField(
+                            value = arvanBucketInput,
+                            onValueChange = { arvanBucketInput = it },
+                            label = { Text("نام صندوقچه (Bucket Name)") },
+                            placeholder = { Text("نام باکت شما در آروان کلود") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Access Key
+                        OutlinedTextField(
+                            value = arvanAccessKeyInput,
+                            onValueChange = { arvanAccessKeyInput = it },
+                            label = { Text("کلید دسترسی (Access Key)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Secret Key
+                        OutlinedTextField(
+                            value = arvanSecretKeyInput,
+                            onValueChange = { arvanSecretKeyInput = it },
+                            label = { Text("کلید محرمانه (Secret Key)") },
+                            singleLine = true,
+                            visualTransformation = if (isSecretVisible) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(onClick = { isSecretVisible = !isSecretVisible }) {
+                                    Icon(
+                                        imageVector = if (isSecretVisible) Icons.Default.Check else Icons.Default.Close,
+                                        contentDescription = "تغییر نمایش کلید",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Custom Domain
+                        OutlinedTextField(
+                            value = arvanCustomDomainInput,
+                            onValueChange = { arvanCustomDomainInput = it },
+                            label = { Text("دامنه اختصاصی یا CDN (اختیاری)") },
+                            placeholder = { Text("مثال: dl.yourdomain.ir") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        // Auto-sync switch
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "بارگذاری خودکار فاکتورها (Auto-Sync)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "ساخت خودکار صفحه HTML و آپلود در پوشه مشتری هنگام ذخیره فاکتور",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = arvanAutoSyncInput,
+                                onCheckedChange = { arvanAutoSyncInput = it }
+                            )
+                        }
+
+                        // Test Connection Status Message
+                        viewModel.arvanTestStatusMessage?.let { msg ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (viewModel.isArvanTestSuccess == true) Color(0xFF10B981).copy(alpha = 0.15f) else MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = msg,
+                                    fontSize = 11.sp,
+                                    color = if (viewModel.isArvanTestSuccess == true) Color(0xFF047857) else MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.padding(10.dp),
+                                    lineHeight = 16.sp
+                                )
+                            }
+                        }
+
+                        // Action Buttons inside Arvan Card
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.arvanEndpoint = arvanEndpointInput
+                                    viewModel.arvanBucket = arvanBucketInput
+                                    viewModel.arvanAccessKey = arvanAccessKeyInput
+                                    viewModel.arvanSecretKey = arvanSecretKeyInput
+                                    viewModel.arvanCustomDomain = arvanCustomDomainInput
+                                    viewModel.testArvanConnection()
+                                },
+                                enabled = !viewModel.isTestingArvanConnection,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).height(40.dp)
+                            ) {
+                                if (viewModel.isTestingArvanConnection) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("در حال تست...", fontSize = 11.sp)
+                                } else {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("تست اتصال آنلاین", fontSize = 11.sp)
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    viewModel.navigateTo("CLOUD_FILE_MANAGER")
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f).height(40.dp)
+                            ) {
+                                Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("مدیریت فایل‌های ابری", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
             // Action save button
             item {
                 Button(
@@ -4028,13 +4320,21 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
                             mSignImg = mSignImgBase64,
                             sSignImg = sSignImgBase64
                         )
+                        viewModel.updateArvanCloudSettings(
+                            endpoint = arvanEndpointInput,
+                            bucket = arvanBucketInput,
+                            accessKey = arvanAccessKeyInput,
+                            secretKey = arvanSecretKeyInput,
+                            customDomain = arvanCustomDomainInput,
+                            autoSync = arvanAutoSyncInput
+                        )
                     },
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("ذخیره نهایی تنظیمات پیش‌فرض", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("ذخیره نهایی تمامی تنظیمات (فروشگاه و صندوقچه ابری)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
 

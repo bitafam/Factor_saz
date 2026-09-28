@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import android.content.Context
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -17,6 +18,8 @@ import com.example.data.repository.InvoiceRepository
 import com.example.util.HtmlInvoiceGenerator
 import com.example.util.LicenseManager
 import com.example.util.JalaliCalendar
+import com.example.util.cloud.ArvanCloudS3Client
+import com.example.util.cloud.InvoiceCloudSyncManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,7 +40,7 @@ class InvoiceViewModel(
     private val context: Context
 ) : ViewModel() {
 
-    // Nav-State Screen Target: "EDITOR", "HISTORY", "ACTIVATION_LOCK", "ADMIN_PANEL"
+    // Nav-State Screen Target: "EDITOR", "HISTORY", "ACTIVATION_LOCK", "ADMIN_PANEL", "ACCOUNT", "SETTINGS", "CLOUD_FILE_MANAGER"
     var currentScreen by mutableStateOf("EDITOR")
         private set
 
@@ -83,6 +86,38 @@ class InvoiceViewModel(
     // Customizable Invoice Titles
     var invoiceTitle by mutableStateOf("")
     var invoiceSubtitle by mutableStateOf("")
+
+    // ArvanCloud Object Storage (صندوقچه ابری آروان کلود) Configuration States
+    var arvanEndpoint by mutableStateOf("s3.ir-thr-at1.arvanstorage.ir")
+    var arvanBucket by mutableStateOf("")
+    var arvanAccessKey by mutableStateOf("")
+    var arvanSecretKey by mutableStateOf("")
+    var arvanCustomDomain by mutableStateOf("")
+    var arvanAutoSync by mutableStateOf(true)
+    var isTestingArvanConnection by mutableStateOf(false)
+    var arvanTestStatusMessage by mutableStateOf<String?>(null)
+    var isArvanTestSuccess by mutableStateOf<Boolean?>(null)
+
+    // Current Invoice Cloud & Attachment States
+    var cloudHtmlUrl by mutableStateOf("")
+    val activeAttachments = mutableStateListOf<InvoiceAttachment>()
+    var isUploadingAttachment by mutableStateOf(false)
+
+    // Batch Cloud Sync Progress States (For Safe Restore & Full Queue Sync)
+    var isBatchSyncActive by mutableStateOf(false)
+    var batchSyncCurrent by mutableStateOf(0)
+    var batchSyncTotal by mutableStateOf(0)
+    var batchSyncCurrentInvoiceName by mutableStateOf("")
+    var batchSyncStatusText by mutableStateOf("")
+    var batchSyncSuccessCount by mutableStateOf(0)
+    var batchSyncSkippedCount by mutableStateOf(0)
+    var batchSyncFailedCount by mutableStateOf(0)
+
+    // Cloud File Manager Screen States
+    val cloudFiles = mutableStateListOf<CloudFileItem>()
+    var isLoadingCloudFiles by mutableStateOf(false)
+    var cloudFilesError by mutableStateOf<String?>(null)
+    var cloudFileSearchQuery by mutableStateOf("")
 
     val deletedInvoices: StateFlow<List<InvoiceEntity>> = repository.deletedInvoices
         .stateIn(
@@ -240,6 +275,12 @@ class InvoiceViewModel(
                 salesSign = direct.defaultSalesSign
                 managerSignImgBase64 = direct.defaultManagerSignImg
                 salesSignImgBase64 = direct.defaultSalesSignImg
+                arvanEndpoint = direct.arvanEndpoint.ifBlank { "s3.ir-thr-at1.arvanstorage.ir" }
+                arvanBucket = direct.arvanBucket
+                arvanAccessKey = direct.arvanAccessKey
+                arvanSecretKey = direct.arvanSecretKey
+                arvanCustomDomain = direct.arvanCustomDomain
+                arvanAutoSync = direct.arvanAutoSync
 
                 // Verify license locally against hardware hash to preserve activation across opens
                 if (direct.isLicensed) {
@@ -329,6 +370,8 @@ class InvoiceViewModel(
         buyerName = ""
         stoneCode = ""
         stoneType = ""
+        cloudHtmlUrl = ""
+        activeAttachments.clear()
         viewModelScope.launch {
             val direct = repository.getConfigDirect()
             sellerName = direct?.defaultSellerName ?: ""
@@ -498,6 +541,364 @@ class InvoiceViewModel(
             val label = if (isManager) "امضای اول (مدیریت)" else "امضای دوم (فروش)"
             Toast.makeText(context, "$label به عنوان امضای پیش‌فرض در تنظیمات ذخیره شد", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /**
+     * Updates ArvanCloud Object Storage (صندوقچه ابری) connection parameters.
+     */
+    fun updateArvanCloudSettings(
+        endpoint: String,
+        bucket: String,
+        accessKey: String,
+        secretKey: String,
+        customDomain: String,
+        autoSync: Boolean
+    ) {
+        viewModelScope.launch {
+            val currentConfig = repository.getConfigDirect() ?: ConfigEntity(deviceId = LicenseManager.getDeviceId(context))
+            val updated = currentConfig.copy(
+                arvanEndpoint = endpoint.trim().ifBlank { "s3.ir-thr-at1.arvanstorage.ir" },
+                arvanBucket = bucket.trim(),
+                arvanAccessKey = accessKey.trim(),
+                arvanSecretKey = secretKey.trim(),
+                arvanCustomDomain = customDomain.trim(),
+                arvanAutoSync = autoSync
+            )
+            repository.saveConfig(updated)
+            arvanEndpoint = updated.arvanEndpoint
+            arvanBucket = updated.arvanBucket
+            arvanAccessKey = updated.arvanAccessKey
+            arvanSecretKey = updated.arvanSecretKey
+            arvanCustomDomain = updated.arvanCustomDomain
+            arvanAutoSync = updated.arvanAutoSync
+            Toast.makeText(context, "تنظیمات صندوقچه ابری آروان با موفقیت ذخیره گردید.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * Tests online connection to ArvanCloud S3 bucket.
+     */
+    fun testArvanConnection() {
+        if (arvanBucket.isBlank() || arvanAccessKey.isBlank() || arvanSecretKey.isBlank()) {
+            arvanTestStatusMessage = "لطفاً نام صندوقچه (Bucket) و کلیدهای دسترسی (Access Key و Secret Key) را کامل کنید."
+            isArvanTestSuccess = false
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) {
+                isTestingArvanConnection = true
+                arvanTestStatusMessage = "در حال اتصال به صندوقچه ابری آروان کلود..."
+                isArvanTestSuccess = null
+            }
+            val client = ArvanCloudS3Client(
+                endpoint = arvanEndpoint,
+                bucket = arvanBucket,
+                accessKey = arvanAccessKey,
+                secretKey = arvanSecretKey,
+                customDomain = arvanCustomDomain
+            )
+            val result = client.testConnection()
+            withContext(Dispatchers.Main) {
+                isTestingArvanConnection = false
+                if (result.isSuccess) {
+                    isArvanTestSuccess = true
+                    arvanTestStatusMessage = "✅ " + result.getOrThrow()
+                    Toast.makeText(context, "اتصال به صندوقچه ابری با موفقیت برقرار شد.", Toast.LENGTH_SHORT).show()
+                } else {
+                    isArvanTestSuccess = false
+                    arvanTestStatusMessage = "❌ " + (result.exceptionOrNull()?.message ?: "خطا در اتصال")
+                }
+            }
+        }
+    }
+
+    /**
+     * Converts image to WebP, uploads to ArvanCloud in invoice dedicated customer folder, and updates active attachments.
+     */
+    fun uploadAttachmentToInvoice(context: Context, uri: Uri, title: String) {
+        val currentBuyer = buyerName.trim()
+        if (currentBuyer.isBlank()) {
+            Toast.makeText(context, "لطفاً ابتدا نام خریدار را وارد کنید تا پوشه مخصوص به نام مشتری ایجاد گردد.", Toast.LENGTH_LONG).show()
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) {
+                isUploadingAttachment = true
+            }
+            try {
+                val webpBytes = InvoiceCloudSyncManager.convertImageToWebP(context, uri)
+                if (webpBytes == null || webpBytes.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        isUploadingAttachment = false
+                        Toast.makeText(context, "فایل نامعتبر است یا فشرده‌سازی تصویر WebP با خطا مواجه شد.", Toast.LENGTH_LONG).show()
+                    }
+                    return@launch
+                }
+
+                val config = repository.getConfigDirect()
+                val client = InvoiceCloudSyncManager.createClient(config)
+
+                if (client != null && client.isConfigured) {
+                    val uploadResult = InvoiceCloudSyncManager.uploadAttachment(
+                        client = client,
+                        buyerName = currentBuyer,
+                        invoiceNo = invoiceNo,
+                        title = title,
+                        webpBytes = webpBytes,
+                        existingCount = activeAttachments.size
+                    )
+                    if (uploadResult.isSuccess) {
+                        val attachment = uploadResult.getOrThrow()
+                        withContext(Dispatchers.Main) {
+                            activeAttachments.add(attachment)
+                            isUploadingAttachment = false
+                            Toast.makeText(context, "تصویر به WebP تبدیل و در صندوقچه ابری بارگذاری شد.", Toast.LENGTH_SHORT).show()
+                        }
+                        autoSaveInvoiceSilently()
+                    } else {
+                        val err = uploadResult.exceptionOrNull()?.message ?: "خطا در بارگذاری ابری"
+                        val fallback = InvoiceAttachment(
+                            title = title.ifBlank { "ضمیمه ${activeAttachments.size + 1}" },
+                            fileName = "attachment_${activeAttachments.size + 1}.webp",
+                            cloudUrl = "",
+                            localUri = uri.toString(),
+                            uploadDate = JalaliCalendar.getTodayJalali(),
+                            fileSizeKb = (webpBytes.size / 1024L).coerceAtLeast(1L)
+                        )
+                        withContext(Dispatchers.Main) {
+                            activeAttachments.add(fallback)
+                            isUploadingAttachment = false
+                            Toast.makeText(context, "تصویر محلی اضافه شد اما بارگذاری ابری ناموفق بود: $err", Toast.LENGTH_LONG).show()
+                        }
+                        autoSaveInvoiceSilently()
+                    }
+                } else {
+                    val localAtt = InvoiceAttachment(
+                        title = title.ifBlank { "ضمیمه ${activeAttachments.size + 1}" },
+                        fileName = "attachment_${activeAttachments.size + 1}.webp",
+                        cloudUrl = "",
+                        localUri = uri.toString(),
+                        uploadDate = JalaliCalendar.getTodayJalali(),
+                        fileSizeKb = (webpBytes.size / 1024L).coerceAtLeast(1L)
+                    )
+                    withContext(Dispatchers.Main) {
+                        activeAttachments.add(localAtt)
+                        isUploadingAttachment = false
+                        Toast.makeText(context, "تصویر پیوست اضافه شد. (جهت بارگذاری در صندوقچه، تنظیمات را تکمیل فرمایید)", Toast.LENGTH_LONG).show()
+                    }
+                    autoSaveInvoiceSilently()
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isUploadingAttachment = false
+                    Toast.makeText(context, "خطا در افزودن پیوست: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * Removes an attachment by index and optionally deletes it from ArvanCloud S3.
+     */
+    fun removeAttachmentFromInvoice(index: Int) {
+        if (index in activeAttachments.indices) {
+            val att = activeAttachments[index]
+            activeAttachments.removeAt(index)
+            if (att.fileName.isNotBlank()) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val config = repository.getConfigDirect()
+                    val client = InvoiceCloudSyncManager.createClient(config)
+                    if (client != null) {
+                        val folder = InvoiceCloudSyncManager.getInvoiceFolderName(buyerName, invoiceNo)
+                        client.deleteObject("$folder/${att.fileName}")
+                    }
+                }
+            }
+            autoSaveInvoiceSilently()
+            Toast.makeText(context, "پیوست با موفقیت حذف گردید.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * Fetches file and folder listing from ArvanCloud Object Storage.
+     */
+    fun loadCloudFiles(prefix: String = "invoices/") {
+        viewModelScope.launch(Dispatchers.IO) {
+            withContext(Dispatchers.Main) {
+                isLoadingCloudFiles = true
+                cloudFilesError = null
+            }
+            val config = repository.getConfigDirect()
+            val client = if (config != null) ArvanCloudS3Client(
+                endpoint = config.arvanEndpoint,
+                bucket = config.arvanBucket,
+                accessKey = config.arvanAccessKey,
+                secretKey = config.arvanSecretKey,
+                customDomain = config.arvanCustomDomain
+            ) else null
+
+            if (client == null || !client.isConfigured) {
+                withContext(Dispatchers.Main) {
+                    isLoadingCloudFiles = false
+                    cloudFilesError = "تنظیمات صندوقچه ابری آروان کلود ناقص است. لطفاً ابتدا در بخش تنظیمات کلیدها را وارد فرمایید."
+                }
+                return@launch
+            }
+
+            val result = client.listObjects(prefix)
+            withContext(Dispatchers.Main) {
+                isLoadingCloudFiles = false
+                if (result.isSuccess) {
+                    cloudFiles.clear()
+                    cloudFiles.addAll(result.getOrThrow())
+                } else {
+                    cloudFilesError = result.exceptionOrNull()?.message ?: "خطا در دریافت لیست فایل‌ها"
+                }
+            }
+        }
+    }
+
+    /**
+     * Deletes a file from ArvanCloud Object Storage.
+     */
+    fun deleteCloudFile(item: CloudFileItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val config = repository.getConfigDirect()
+            val client = if (config != null) ArvanCloudS3Client(
+                endpoint = config.arvanEndpoint,
+                bucket = config.arvanBucket,
+                accessKey = config.arvanAccessKey,
+                secretKey = config.arvanSecretKey,
+                customDomain = config.arvanCustomDomain
+            ) else null
+
+            if (client == null || !client.isConfigured) return@launch
+
+            val result = client.deleteObject(item.key)
+            withContext(Dispatchers.Main) {
+                if (result.isSuccess) {
+                    cloudFiles.remove(item)
+                    Toast.makeText(context, "فایل «${item.fileName}» از صندوقچه حذف گردید.", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(context, "خطا در حذف فایل: ${result.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * Uploads single invoice HTML directly to ArvanCloud.
+     */
+    fun uploadSingleInvoiceToCloud(invoice: InvoiceEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val config = repository.getConfigDirect()
+            val client = if (config != null) ArvanCloudS3Client(
+                endpoint = config.arvanEndpoint,
+                bucket = config.arvanBucket,
+                accessKey = config.arvanAccessKey,
+                secretKey = config.arvanSecretKey,
+                customDomain = config.arvanCustomDomain
+            ) else null
+
+            if (client == null || !client.isConfigured) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "لطفاً ابتدا تنظیمات صندوقچه آروان کلود را تکمیل فرمایید.", Toast.LENGTH_LONG).show()
+                }
+                return@launch
+            }
+
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "در حال تولید HTML و بارگذاری در صندوقچه...", Toast.LENGTH_SHORT).show()
+            }
+
+            val res = InvoiceCloudSyncManager.uploadInvoiceHtml(client, invoice)
+            if (res.isSuccess) {
+                val url = res.getOrThrow()
+                val updated = invoice.copy(cloudHtmlUrl = url)
+                repository.updateInvoice(updated)
+                withContext(Dispatchers.Main) {
+                    if (id == invoice.id) {
+                        cloudHtmlUrl = url
+                    }
+                    Toast.makeText(context, "✅ فاکتور در صندوقچه ثبت شد و لینک آنلاین متصل گردید.", Toast.LENGTH_LONG).show()
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "خطا در بارگذاری ابری: ${res.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * Sequentially syncs all invoices in database to ArvanCloud queue with progress and deduplication.
+     */
+    fun syncAllInvoicesToCloud(forceReupload: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val config = repository.getConfigDirect()
+            val client = if (config != null) ArvanCloudS3Client(
+                endpoint = config.arvanEndpoint,
+                bucket = config.arvanBucket,
+                accessKey = config.arvanAccessKey,
+                secretKey = config.arvanSecretKey,
+                customDomain = config.arvanCustomDomain
+            ) else null
+
+            if (client == null || !client.isConfigured) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "ابتدا تنظیمات صندوقچه آروان کلود را ذخیره فرمایید.", Toast.LENGTH_LONG).show()
+                }
+                return@launch
+            }
+
+            val allInvoices = repository.getAllInvoicesDirect().filter { !it.isDeleted }
+            if (allInvoices.isEmpty()) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "هیچ فاکتور فعالی برای همگام‌سازی وجود ندارد.", Toast.LENGTH_SHORT).show()
+                }
+                return@launch
+            }
+
+            withContext(Dispatchers.Main) {
+                isBatchSyncActive = true
+                batchSyncCurrent = 0
+                batchSyncTotal = allInvoices.size
+                batchSyncStatusText = "در حال آماده‌سازی صف بارگذاری..."
+                batchSyncSuccessCount = 0
+                batchSyncSkippedCount = 0
+                batchSyncFailedCount = 0
+            }
+
+            val result = InvoiceCloudSyncManager.syncBatchQueue(
+                client = client,
+                invoices = allInvoices,
+                forceReupload = forceReupload
+            ) { current, total, name, msg ->
+                viewModelScope.launch(Dispatchers.Main) {
+                    batchSyncCurrent = current
+                    batchSyncTotal = total
+                    batchSyncCurrentInvoiceName = name
+                    batchSyncStatusText = msg
+                }
+            }
+
+            for (updatedInv in result.updatedInvoices) {
+                repository.updateInvoice(updatedInv)
+            }
+
+            withContext(Dispatchers.Main) {
+                isBatchSyncActive = false
+                batchSyncSuccessCount = result.newlyUploaded
+                batchSyncSkippedCount = result.skippedAlreadyUploaded
+                batchSyncFailedCount = result.failedCount
+                val summary = "همگام‌سازی پایان یافت:\n• ${result.newlyUploaded} فاکتور جدید بارگذاری شد.\n• ${result.skippedAlreadyUploaded} فاکتور قبلاً موجود بود (بدون داپلیکیت).\n• ${result.failedCount} خطا."
+                Toast.makeText(context, summary, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    fun dismissBatchSyncDialog() {
+        isBatchSyncActive = false
     }
 
     // Add list items
@@ -685,6 +1086,7 @@ class InvoiceViewModel(
             val itemsJson = ItemJsonConverter.serializeInvoiceItems(normalItems)
             val simpleItemsJson = ItemJsonConverter.serializeSimpleItems(simpleItems)
             val pctJson = ItemJsonConverter.serializePercentageItems(percentageItems)
+            val attJson = ItemJsonConverter.serializeAttachments(activeAttachments)
 
             val entity = InvoiceEntity(
                 id = id,
@@ -705,7 +1107,9 @@ class InvoiceViewModel(
                 invoiceSubtitle = invoiceSubtitle,
                 totalAmount = grandTotal,
                 managerSignImgBase64 = managerSignImgBase64,
-                salesSignImgBase64 = salesSignImgBase64
+                salesSignImgBase64 = salesSignImgBase64,
+                cloudHtmlUrl = cloudHtmlUrl,
+                attachmentsJson = attJson
             )
 
             val savedId = repository.insertInvoice(entity)
@@ -723,6 +1127,24 @@ class InvoiceViewModel(
             } else ""
 
             Toast.makeText(context, "فاکتور ذخیره گردید.$pathInfo", Toast.LENGTH_LONG).show()
+
+            // Auto-upload HTML and sync to ArvanCloud Object Storage in background
+            val config = repository.getConfigDirect()
+            val client = InvoiceCloudSyncManager.createClient(config)
+            if (client != null && client.isConfigured) {
+                launch(Dispatchers.IO) {
+                    val uploadResult = InvoiceCloudSyncManager.uploadInvoiceHtml(client, backupEntity)
+                    if (uploadResult.isSuccess) {
+                        val url = uploadResult.getOrThrow()
+                        val updated = backupEntity.copy(cloudHtmlUrl = url)
+                        repository.updateInvoice(updated)
+                        withContext(Dispatchers.Main) {
+                            cloudHtmlUrl = url
+                            Toast.makeText(context, "✅ نسخه HTML فاکتور در صندوقچه ابری آروان ثبت و لینک متصل شد.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -733,6 +1155,7 @@ class InvoiceViewModel(
             val itemsJson = ItemJsonConverter.serializeInvoiceItems(normalItems)
             val simpleItemsJson = ItemJsonConverter.serializeSimpleItems(simpleItems)
             val pctJson = ItemJsonConverter.serializePercentageItems(percentageItems)
+            val attJson = ItemJsonConverter.serializeAttachments(activeAttachments)
 
             val entity = InvoiceEntity(
                 id = id,
@@ -753,7 +1176,9 @@ class InvoiceViewModel(
                 invoiceSubtitle = invoiceSubtitle,
                 totalAmount = grandTotal,
                 managerSignImgBase64 = managerSignImgBase64,
-                salesSignImgBase64 = salesSignImgBase64
+                salesSignImgBase64 = salesSignImgBase64,
+                cloudHtmlUrl = cloudHtmlUrl,
+                attachmentsJson = attJson
             )
 
             val savedId = repository.insertInvoice(entity)
@@ -781,12 +1206,14 @@ class InvoiceViewModel(
         salesSign = invoice.salesSign
         managerSignImgBase64 = invoice.managerSignImgBase64
         salesSignImgBase64 = invoice.salesSignImgBase64
+        cloudHtmlUrl = invoice.cloudHtmlUrl
         invoiceTitle = invoice.invoiceTitle.ifBlank { "فاکتور فروش صنایع سنگ ایران کوارتز" }
         invoiceSubtitle = invoice.invoiceSubtitle.ifBlank { "مجری فروش اسلب کوارتز ساخت و نصب کانترتاپ کوارتز کاینداستون توتم گریفین" }
 
         val loadedNormals = ItemJsonConverter.deserializeInvoiceItems(invoice.itemsJson)
         val loadedSimples = ItemJsonConverter.deserializeSimpleItems(invoice.simpleItemsJson)
         val loadedPercentages = ItemJsonConverter.deserializePercentageItems(invoice.percentageItemsJson)
+        val loadedAttachments = ItemJsonConverter.deserializeAttachments(invoice.attachmentsJson)
 
         normalItems.clear()
         normalItems.addAll(loadedNormals)
@@ -796,6 +1223,9 @@ class InvoiceViewModel(
 
         percentageItems.clear()
         percentageItems.addAll(loadedPercentages)
+
+        activeAttachments.clear()
+        activeAttachments.addAll(loadedAttachments)
 
         if (normalItems.isEmpty()) {
             addNormalItemRow()

@@ -346,7 +346,51 @@ object HtmlInvoiceGenerator {
                 </tr>
             </tbody>
             </table>
+        """.trimIndent())
 
+        // 5. Attachments Section (if any)
+        val attachments = ItemJsonConverter.deserializeAttachments(invoice.attachmentsJson)
+        if (attachments.isNotEmpty() || invoice.cloudHtmlUrl.isNotBlank()) {
+            sb.append("""
+                <div class="attachments-container" style="margin-top: 20px; padding: 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px;">
+                    <div style="font-weight: bold; color: #00796b; font-size: 13px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+                        <span>📎 پیوست‌ها و اسناد ضمیمه فاکتور (رسیدها، نقشه‌ها و تصاویر):</span>
+                        ${if (invoice.cloudHtmlUrl.isNotBlank()) """<span style="font-size: 11px; background: #e0f2f1; color: #004d40; padding: 3px 8px; border-radius: 4px;">ثبت شده در صندوقچه ابری آروان کلود</span>""" else ""}
+                    </div>
+                    ${if (attachments.isNotEmpty()) """
+                        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+                            ${attachments.mapIndexed { idx, att ->
+                                """
+                                <div style="display: flex; align-items: center; justify-content: space-between; background: #ffffff; padding: 8px 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span style="font-weight: bold; color: #00796b; font-size: 12px;">${idx + 1}.</span>
+                                        <span style="font-size: 12px; font-weight: bold; color: #1e293b;">${att.title.ifBlank { "ضمیمه ${idx + 1}" }}</span>
+                                        <span style="font-size: 11px; color: #64748b;">(${att.fileName})</span>
+                                    </div>
+                                    <div>
+                                        ${if (att.cloudUrl.isNotBlank()) """
+                                            <a href="${att.cloudUrl}" target="_blank" style="display: inline-block; background: #00796b; color: #ffffff; text-decoration: none; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold;">مشاهده آنلاین تصویر</a>
+                                        """ else """
+                                            <span style="font-size: 11px; color: #94a3b8;">در صف بارگذاری</span>
+                                        """}
+                                    </div>
+                                </div>
+                                """
+                            }.joinToString("\n")}
+                        </div>
+                    """ else """
+                        <div style="font-size: 11px; color: #64748b;">ضمیمه‌ای برای این فاکتور ثبت نشده است.</div>
+                    """}
+                    ${if (invoice.cloudHtmlUrl.isNotBlank()) """
+                        <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #cbd5e1; font-size: 11px; color: #334155;">
+                            <strong>لینک دسترسی آنلاین به فاکتور:</strong> <a href="${invoice.cloudHtmlUrl}" target="_blank" style="color: #0284c7; text-decoration: underline; word-break: break-all;">${invoice.cloudHtmlUrl}</a>
+                        </div>
+                    """ else ""}
+                </div>
+            """.trimIndent())
+        }
+
+        sb.append("""
             <table class="signatures-section">
                 <tr>
                     <td class="signature-box">
@@ -546,11 +590,12 @@ object HtmlInvoiceGenerator {
                         <thead>
                             <tr>
                                 <th style="width: 5%;">ردیف</th>
-                                <th style="width: 25%;">نام خریدار</th>
-                                <th style="width: 15%;">شماره تماس</th>
-                                <th style="width: 15%;">کد سنگ / توضیحات</th>
-                                <th style="width: 15%;">تاریخ صدور</th>
-                                <th style="width: 25%;">مبلغ کل فاکتور (ریال)</th>
+                                <th style="width: 20%;">نام خریدار</th>
+                                <th style="width: 13%;">شماره فاکتور/تماس</th>
+                                <th style="width: 14%;">کد سنگ / مشخصات</th>
+                                <th style="width: 12%;">تاریخ صدور</th>
+                                <th style="width: 18%;">مبلغ کل (ریال)</th>
+                                <th style="width: 18%;">لینک آنلاین فاکتور</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -570,10 +615,17 @@ object HtmlInvoiceGenerator {
                 <tr>
                     <td>${idx + 1}</td>
                     <td style="text-align: right; font-weight: bold;">${inv.buyerName.ifBlank { "نامشخص" }}</td>
-                    <td>${inv.sellerPhone.ifBlank { inv.invoiceNo }}</td>
+                    <td>${inv.invoiceNo}</td>
                     <td>${codeDesc}</td>
                     <td>${inv.invoiceDate}</td>
                     <td style="font-weight: bold; color: #004d40;">${df.format(rowTotal)} ریال</td>
+                    <td>
+                        ${if (inv.cloudHtmlUrl.isNotBlank()) """
+                            <a href="${inv.cloudHtmlUrl}" target="_blank" style="display: inline-block; background: #00796b; color: #ffffff; text-decoration: none; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;">مشاهده فاکتور</a>
+                        """ else """
+                            <span style="color: #94a3b8; font-size: 11px;">آفلاین</span>
+                        """}
+                    </td>
                 </tr>
             """.trimIndent())
         }

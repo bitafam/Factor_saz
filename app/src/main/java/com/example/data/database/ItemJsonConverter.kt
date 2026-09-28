@@ -109,4 +109,45 @@ object ItemJsonConverter {
         }
         return list
     }
+
+    fun serializeAttachments(attachments: List<InvoiceAttachment>): String {
+        val array = JSONArray()
+        for (item in attachments) {
+            val obj = JSONObject()
+            obj.put("id", item.id)
+            obj.put("title", item.title)
+            obj.put("fileName", item.fileName)
+            obj.put("cloudUrl", item.cloudUrl)
+            obj.put("localUri", item.localUri)
+            obj.put("uploadDate", item.uploadDate)
+            obj.put("fileSizeKb", item.fileSizeKb)
+            array.put(obj)
+        }
+        return array.toString()
+    }
+
+    fun deserializeAttachments(json: String?): List<InvoiceAttachment> {
+        if (json.isNullOrBlank()) return emptyList()
+        val list = mutableListOf<InvoiceAttachment>()
+        try {
+            val array = JSONArray(json)
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                list.add(
+                    InvoiceAttachment(
+                        id = obj.optString("id", java.util.UUID.randomUUID().toString()),
+                        title = obj.optString("title", ""),
+                        fileName = obj.optString("fileName", ""),
+                        cloudUrl = obj.optString("cloudUrl", ""),
+                        localUri = obj.optString("localUri", ""),
+                        uploadDate = obj.optString("uploadDate", ""),
+                        fileSizeKb = obj.optLong("fileSizeKb", 0L)
+                    )
+                )
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return list
+    }
 }

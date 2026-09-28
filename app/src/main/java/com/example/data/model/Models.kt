@@ -56,3 +56,24 @@ data class ComposePercentageItem(
     val description: String = "", // e.g., "اجرت نصب"
     val percentageStr: String = "" // e.g., "10"
 )
+
+data class InvoiceAttachment(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String = "",
+    val fileName: String = "",
+    val cloudUrl: String = "",
+    val localUri: String = "",
+    val uploadDate: String = "",
+    val fileSizeKb: Long = 0L
+)
+
+data class CloudFileItem(
+    val key: String,
+    val fileName: String,
+    val folderName: String,
+    val sizeBytes: Long,
+    val lastModified: String,
+    val url: String,
+    val isHtmlInvoice: Boolean = false,
+    val isWebpAttachment: Boolean = false
+)
