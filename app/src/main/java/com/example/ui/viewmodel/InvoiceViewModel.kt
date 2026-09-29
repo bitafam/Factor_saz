@@ -660,6 +660,7 @@ class InvoiceViewModel(
                             Toast.makeText(context, "تصویر به WebP تبدیل و در صندوقچه ابری بارگذاری شد.", Toast.LENGTH_SHORT).show()
                         }
                         autoSaveInvoiceSilently()
+                        updateCloudHtmlAfterAttachmentChange()
                     } else {
                         val err = uploadResult.exceptionOrNull()?.message ?: "خطا در بارگذاری ابری"
                         val fallback = InvoiceAttachment(
@@ -676,6 +677,7 @@ class InvoiceViewModel(
                             Toast.makeText(context, "تصویر محلی اضافه شد اما بارگذاری ابری ناموفق بود: $err", Toast.LENGTH_LONG).show()
                         }
                         autoSaveInvoiceSilently()
+                        updateCloudHtmlAfterAttachmentChange()
                     }
                 } else {
                     val localAtt = InvoiceAttachment(
@@ -692,6 +694,7 @@ class InvoiceViewModel(
                         Toast.makeText(context, "تصویر پیوست اضافه شد. (جهت بارگذاری در صندوقچه، تنظیمات را تکمیل فرمایید)", Toast.LENGTH_LONG).show()
                     }
                     autoSaveInvoiceSilently()
+                    updateCloudHtmlAfterAttachmentChange()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -720,7 +723,60 @@ class InvoiceViewModel(
                 }
             }
             autoSaveInvoiceSilently()
+            updateCloudHtmlAfterAttachmentChange()
             Toast.makeText(context, "پیوست با موفقیت حذف گردید.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun updateCloudHtmlAfterAttachmentChange() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val config = repository.getConfigDirect()
+                val client = InvoiceCloudSyncManager.createClient(config)
+                if (client != null && client.isConfigured) {
+                    val currentBuyer = buyerName.trim().ifBlank { "مشتری" }
+                    val itemsJson = ItemJsonConverter.serializeInvoiceItems(normalItems)
+                    val simpleItemsJson = ItemJsonConverter.serializeSimpleItems(simpleItems)
+                    val pctJson = ItemJsonConverter.serializePercentageItems(percentageItems)
+                    val attJson = ItemJsonConverter.serializeAttachments(activeAttachments)
+
+                    val entity = InvoiceEntity(
+                        id = id,
+                        invoiceNo = invoiceNo,
+                        invoiceDate = invoiceDate,
+                        buyerName = currentBuyer,
+                        sellerName = sellerName,
+                        sellerPhone = sellerPhone,
+                        sellerAddress = sellerAddress,
+                        stoneCode = stoneCode,
+                        stoneType = stoneType,
+                        managerSign = managerSign,
+                        salesSign = salesSign,
+                        itemsJson = itemsJson,
+                        simpleItemsJson = simpleItemsJson,
+                        percentageItemsJson = pctJson,
+                        invoiceTitle = invoiceTitle,
+                        invoiceSubtitle = invoiceSubtitle,
+                        totalAmount = grandTotal,
+                        managerSignImgBase64 = managerSignImgBase64,
+                        salesSignImgBase64 = salesSignImgBase64,
+                        cloudHtmlUrl = cloudHtmlUrl,
+                        attachmentsJson = attJson
+                    )
+
+                    val res = InvoiceCloudSyncManager.uploadInvoiceHtml(client, entity)
+                    if (res.isSuccess) {
+                        val url = res.getOrThrow()
+                        if (cloudHtmlUrl.isBlank()) {
+                            cloudHtmlUrl = url
+                            val updated = entity.copy(cloudHtmlUrl = url)
+                            repository.updateInvoice(updated)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
