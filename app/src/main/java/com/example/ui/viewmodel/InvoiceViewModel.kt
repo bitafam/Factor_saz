@@ -1377,7 +1377,7 @@ class InvoiceViewModel(
 
     fun saveInvoicePdfProgrammatically(context: Context, invoice: InvoiceEntity, onComplete: (File?) -> Unit) {
         try {
-            val html = HtmlInvoiceGenerator.generateHtml(invoice)
+            val html = HtmlInvoiceGenerator.generateHtml(invoice, includeAttachments = false)
             val safeBuyer = invoice.buyerName.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
             val safeNo = invoice.invoiceNo.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
             val fileName = "فاکتور_${safeBuyer}_${safeNo}.pdf"
@@ -1430,7 +1430,7 @@ class InvoiceViewModel(
 
     fun saveSummaryPdfProgrammatically(context: Context, startDate: String, endDate: String, selectedInvoices: List<InvoiceEntity>, onComplete: (File?) -> Unit) {
         try {
-            val html = HtmlInvoiceGenerator.generateSummaryHtml(startDate, endDate, selectedInvoices)
+            val html = HtmlInvoiceGenerator.generateSummaryHtml(startDate, endDate, selectedInvoices, includeViewColumn = false)
             val safeStart = startDate.replace("/", ".")
             val safeEnd = endDate.replace("/", ".")
             val fileName = "خلاصه_فاکتور_های_از_${safeStart}_تا_${safeEnd}.pdf"
@@ -1895,6 +1895,78 @@ class InvoiceViewModel(
             }
         } catch (e: Exception) {
             Toast.makeText(shareContext, "خطا در شروع اشتراک‌گذاری: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun shareHtmlInvoice(context: Context, invoice: InvoiceEntity) {
+        try {
+            val html = HtmlInvoiceGenerator.generateHtml(invoice, includeAttachments = true)
+            val safeBuyer = invoice.buyerName.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            val safeNo = invoice.invoiceNo.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            val fileName = "فاکتور_${safeBuyer}_${safeNo}.html"
+            val htmlDir = File(context.cacheDir, "html_exports")
+            if (!htmlDir.exists()) htmlDir.mkdirs()
+            val file = File(htmlDir, fileName)
+            file.writeText(html, Charsets.UTF_8)
+            startShareIntent(context, file, "اشتراک‌گذاری فاکتور (نسخه HTML)")
+        } catch (e: Exception) {
+            Toast.makeText(context, "خطا در ساخت فاکتور HTML: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun sharePdfInvoice(context: Context, invoice: InvoiceEntity) {
+        try {
+            val safeBuyer = invoice.buyerName.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            val safeNo = invoice.invoiceNo.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            val fileName = "فاکتور_${safeBuyer}_${safeNo}.pdf"
+            val pdfDir = InvoiceBackupManager.getPdfFolder()
+            val pdfFile = File(pdfDir, fileName)
+            
+            if (pdfFile.exists() && pdfFile.length() > 0) {
+                startShareIntent(context, pdfFile, "اشتراک‌گذاری فاکتور (نسخه PDF)")
+            } else {
+                Toast.makeText(context, "در حال تولید فایل PDF فاکتور...", Toast.LENGTH_SHORT).show()
+                saveInvoicePdfProgrammatically(context, invoice) { file ->
+                    if (file != null && file.exists()) {
+                        startShareIntent(context, file, "اشتراک‌گذاری فاکتور (نسخه PDF)")
+                    } else {
+                        Toast.makeText(context, "خطا در تولید PDF", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(context, "خطا در اشتراک‌گذاری PDF: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun shareHtmlSummaryReport(context: Context, startDate: String, endDate: String, invoices: List<InvoiceEntity>) {
+        try {
+            val html = HtmlInvoiceGenerator.generateSummaryHtml(startDate, endDate, invoices, includeViewColumn = true)
+            val safeStart = startDate.replace("/", ".")
+            val safeEnd = endDate.replace("/", ".")
+            val fileName = "خلاصه_فاکتورها_از_${safeStart}_تا_${safeEnd}.html"
+            val htmlDir = File(context.cacheDir, "html_exports")
+            if (!htmlDir.exists()) htmlDir.mkdirs()
+            val file = File(htmlDir, fileName)
+            file.writeText(html, Charsets.UTF_8)
+            startShareIntent(context, file, "اشتراک‌گذاری گزارش خلاصه (نسخه HTML)")
+        } catch (e: Exception) {
+            Toast.makeText(context, "خطا در ساخت گزارش HTML: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun sharePdfSummaryReport(context: Context, startDate: String, endDate: String, invoices: List<InvoiceEntity>) {
+        try {
+            Toast.makeText(context, "در حال تولید فایل PDF خلاصه گزارش...", Toast.LENGTH_SHORT).show()
+            saveSummaryPdfProgrammatically(context, startDate, endDate, invoices) { file ->
+                if (file != null && file.exists()) {
+                    startShareIntent(context, file, "اشتراک‌گذاری گزارش خلاصه (نسخه PDF)")
+                } else {
+                    Toast.makeText(context, "خطا در تولید PDF گزارش خلاصه", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(context, "خطا در اشتراک‌گذاری PDF خلاصه: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 

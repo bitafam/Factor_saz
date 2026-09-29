@@ -8,7 +8,7 @@ import java.text.DecimalFormat
 object HtmlInvoiceGenerator {
     private val df = DecimalFormat("#,###")
 
-    fun generateHtml(invoice: InvoiceEntity): String {
+    fun generateHtml(invoice: InvoiceEntity, includeAttachments: Boolean = true): String {
         val normalItems = ItemJsonConverter.deserializeInvoiceItems(invoice.itemsJson)
         val simpleItems = ItemJsonConverter.deserializeSimpleItems(invoice.simpleItemsJson)
 
@@ -349,45 +349,47 @@ object HtmlInvoiceGenerator {
         """.trimIndent())
 
         // 5. Attachments Section (if any)
-        val attachments = ItemJsonConverter.deserializeAttachments(invoice.attachmentsJson)
-        if (attachments.isNotEmpty() || invoice.cloudHtmlUrl.isNotBlank()) {
-            sb.append("""
-                <div class="attachments-container" style="margin-top: 20px; padding: 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px;">
-                    <div style="font-weight: bold; color: #00796b; font-size: 13px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
-                        <span>📎 پیوست‌ها و اسناد ضمیمه فاکتور (رسیدها، نقشه‌ها و تصاویر):</span>
-                        ${if (invoice.cloudHtmlUrl.isNotBlank()) """<span style="font-size: 11px; background: #e0f2f1; color: #004d40; padding: 3px 8px; border-radius: 4px;">ثبت شده در صندوقچه ابری آروان کلود</span>""" else ""}
+        if (includeAttachments) {
+            val attachments = ItemJsonConverter.deserializeAttachments(invoice.attachmentsJson)
+            if (attachments.isNotEmpty() || invoice.cloudHtmlUrl.isNotBlank()) {
+                sb.append("""
+                    <div class="attachments-container" style="margin-top: 20px; padding: 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px;">
+                        <div style="font-weight: bold; color: #00796b; font-size: 13px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+                            <span>📎 پیوست‌ها و اسناد ضمیمه فاکتور (رسیدها، نقشه‌ها و تصاویر):</span>
+                            ${if (invoice.cloudHtmlUrl.isNotBlank()) """<span style="font-size: 11px; background: #e0f2f1; color: #004d40; padding: 3px 8px; border-radius: 4px;">ثبت شده در صندوقچه ابری آروان کلود</span>""" else ""}
+                        </div>
+                        ${if (attachments.isNotEmpty()) """
+                            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+                                ${attachments.mapIndexed { idx, att ->
+                                    """
+                                    <div style="display: flex; align-items: center; justify-content: space-between; background: #ffffff; padding: 8px 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                                        <div style="display: flex; align-items: center; gap: 8px;">
+                                            <span style="font-weight: bold; color: #00796b; font-size: 12px;">${idx + 1}.</span>
+                                            <span style="font-size: 12px; font-weight: bold; color: #1e293b;">${att.title.ifBlank { "ضمیمه ${idx + 1}" }}</span>
+                                            <span style="font-size: 11px; color: #64748b;">(${att.fileName})</span>
+                                        </div>
+                                        <div>
+                                            ${if (att.cloudUrl.isNotBlank()) """
+                                                <a href="${att.cloudUrl}" target="_blank" style="display: inline-block; background: #00796b; color: #ffffff; text-decoration: none; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold;">مشاهده آنلاین تصویر</a>
+                                            """ else """
+                                                <span style="font-size: 11px; color: #94a3b8;">در صف بارگذاری</span>
+                                            """}
+                                        </div>
+                                    </div>
+                                    """
+                                }.joinToString("\n")}
+                            </div>
+                        """ else """
+                            <div style="font-size: 11px; color: #64748b;">ضمیمه‌ای برای این فاکتور ثبت نشده است.</div>
+                        """}
+                        ${if (invoice.cloudHtmlUrl.isNotBlank()) """
+                            <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #cbd5e1; font-size: 11px; color: #334155;">
+                                <strong>لینک دسترسی آنلاین به فاکتور:</strong> <a href="${invoice.cloudHtmlUrl}" target="_blank" style="color: #0284c7; text-decoration: underline; word-break: break-all;">${invoice.cloudHtmlUrl}</a>
+                            </div>
+                        """ else ""}
                     </div>
-                    ${if (attachments.isNotEmpty()) """
-                        <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
-                            ${attachments.mapIndexed { idx, att ->
-                                """
-                                <div style="display: flex; align-items: center; justify-content: space-between; background: #ffffff; padding: 8px 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
-                                    <div style="display: flex; align-items: center; gap: 8px;">
-                                        <span style="font-weight: bold; color: #00796b; font-size: 12px;">${idx + 1}.</span>
-                                        <span style="font-size: 12px; font-weight: bold; color: #1e293b;">${att.title.ifBlank { "ضمیمه ${idx + 1}" }}</span>
-                                        <span style="font-size: 11px; color: #64748b;">(${att.fileName})</span>
-                                    </div>
-                                    <div>
-                                        ${if (att.cloudUrl.isNotBlank()) """
-                                            <a href="${att.cloudUrl}" target="_blank" style="display: inline-block; background: #00796b; color: #ffffff; text-decoration: none; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold;">مشاهده آنلاین تصویر</a>
-                                        """ else """
-                                            <span style="font-size: 11px; color: #94a3b8;">در صف بارگذاری</span>
-                                        """}
-                                    </div>
-                                </div>
-                                """
-                            }.joinToString("\n")}
-                        </div>
-                    """ else """
-                        <div style="font-size: 11px; color: #64748b;">ضمیمه‌ای برای این فاکتور ثبت نشده است.</div>
-                    """}
-                    ${if (invoice.cloudHtmlUrl.isNotBlank()) """
-                        <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #cbd5e1; font-size: 11px; color: #334155;">
-                            <strong>لینک دسترسی آنلاین به فاکتور:</strong> <a href="${invoice.cloudHtmlUrl}" target="_blank" style="color: #0284c7; text-decoration: underline; word-break: break-all;">${invoice.cloudHtmlUrl}</a>
-                        </div>
-                    """ else ""}
-                </div>
-            """.trimIndent())
+                """.trimIndent())
+            }
         }
 
         sb.append("""
@@ -439,7 +441,7 @@ object HtmlInvoiceGenerator {
         return if (calculated > 0.0) calculated else invoice.totalAmount
     }
 
-    fun generateSummaryHtml(startDate: String, endDate: String, invoices: List<InvoiceEntity>): String {
+    fun generateSummaryHtml(startDate: String, endDate: String, invoices: List<InvoiceEntity>, includeViewColumn: Boolean = true): String {
         val df = DecimalFormat("#,###")
         val grandTotal = invoices.sumOf { inv ->
             val calc = calculateInvoiceTotal(inv)
@@ -595,7 +597,7 @@ object HtmlInvoiceGenerator {
                                 <th style="width: 14%;">کد سنگ / مشخصات</th>
                                 <th style="width: 12%;">تاریخ صدور</th>
                                 <th style="width: 18%;">مبلغ کل (ریال)</th>
-                                <th style="width: 18%;">لینک آنلاین فاکتور</th>
+                                ${if (includeViewColumn) """<th style="width: 18%;">لینک آنلاین فاکتور</th>""" else ""}
                             </tr>
                         </thead>
                         <tbody>
@@ -619,13 +621,15 @@ object HtmlInvoiceGenerator {
                     <td>${codeDesc}</td>
                     <td>${inv.invoiceDate}</td>
                     <td style="font-weight: bold; color: #004d40;">${df.format(rowTotal)} ریال</td>
-                    <td>
-                        ${if (inv.cloudHtmlUrl.isNotBlank()) """
-                            <a href="${inv.cloudHtmlUrl}" target="_blank" style="display: inline-block; background: #00796b; color: #ffffff; text-decoration: none; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;">مشاهده فاکتور</a>
-                        """ else """
-                            <span style="color: #94a3b8; font-size: 11px;">آفلاین</span>
-                        """}
-                    </td>
+                    ${if (includeViewColumn) """
+                        <td>
+                            ${if (inv.cloudHtmlUrl.isNotBlank()) """
+                                <a href="${inv.cloudHtmlUrl}" target="_blank" style="display: inline-block; background: #00796b; color: #ffffff; text-decoration: none; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold;">مشاهده فاکتور</a>
+                            """ else """
+                                <span style="color: #94a3b8; font-size: 11px;">آفلاین</span>
+                            """}
+                        </td>
+                    """ else ""}
                 </tr>
             """.trimIndent())
         }

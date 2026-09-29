@@ -2425,6 +2425,7 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
     val totalRevenueFlow by viewModel.totalRevenueFlow.collectAsStateWithLifecycle()
     val totalCountFlow by viewModel.totalCountFlow.collectAsStateWithLifecycle()
     var searchQuery by remember { mutableStateOf("") }
+    var invoiceForShareChoice by remember { mutableStateOf<InvoiceEntity?>(null) }
 
     val coworkerPackagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -2688,12 +2689,52 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
                             invoice = invoice,
                             onLoad = { viewModel.loadInvoice(invoice) },
                             onDelete = { viewModel.deleteInvoice(invoice) },
-                            onShare = { viewModel.shareInvoice(context, invoice) },
+                            onShare = { invoiceForShareChoice = invoice },
                             onUploadToCloud = { viewModel.uploadSingleInvoiceToCloud(invoice) }
                         )
                     }
                 }
             }
+        }
+
+        if (invoiceForShareChoice != null) {
+            val inv = invoiceForShareChoice!!
+            AlertDialog(
+                onDismissRequest = { invoiceForShareChoice = null },
+                title = { Text("انتخاب فرمت خروجی / اشتراک‌گذاری فاکتور", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
+                text = { Text("لطفاً فرمت فایل فاکتور را برای اشتراک‌گذاری یا ذخیره انتخاب کنید:", fontSize = 12.sp) },
+                confirmButton = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = {
+                                invoiceForShareChoice = null
+                                viewModel.shareHtmlInvoice(context, inv)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("🌐 نسخه HTML (همراه با دکمه‌های ضمیمه و لینک آنلاین)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Button(
+                            onClick = {
+                                invoiceForShareChoice = null
+                                viewModel.sharePdfInvoice(context, inv)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("📄 نسخه PDF (فایل استاندارد بدون ضمیمه)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { invoiceForShareChoice = null }) {
+                        Text("انصراف", fontSize = 12.sp)
+                    }
+                }
+            )
         }
     }
 
@@ -3505,27 +3546,54 @@ fun AccountScreen(viewModel: InvoiceViewModel) {
                             }
                         }
 
-                        Button(
-                            onClick = {
-                                val printInvoices = periodInvoices.filter { selectedInvoicesMap[it.id] ?: true }
-                                if (printInvoices.isEmpty()) {
-                                    Toast.makeText(context, "هیچ فاکتوری علامت‌گذاری نشده است", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    viewModel.printSummaryReport(
-                                        printContext = context,
-                                        startDate = startDateInput.ifBlank { "آغاز" },
-                                        endDate = endDateInput.ifBlank { "پایان" },
-                                        selectedInvoices = printInvoices
-                                    )
-                                }
-                            },
-                            shape = RoundedCornerShape(8.dp),
-                            enabled = periodInvoices.isNotEmpty(),
-                            modifier = Modifier.fillMaxWidth().height(48.dp)
-                        ) {
-                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("ساخت خروجی سمی و زیبا خلاصه کارکرد PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            Button(
+                                onClick = {
+                                    val printInvoices = periodInvoices.filter { selectedInvoicesMap[it.id] ?: true }
+                                    if (printInvoices.isEmpty()) {
+                                        Toast.makeText(context, "هیچ فاکتوری علامت‌گذاری نشده است", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        viewModel.shareHtmlSummaryReport(
+                                            context = context,
+                                            startDate = startDateInput.ifBlank { "آغاز" },
+                                            endDate = endDateInput.ifBlank { "پایان" },
+                                            invoices = printInvoices
+                                        )
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = periodInvoices.isNotEmpty(),
+                                modifier = Modifier.fillMaxWidth().height(44.dp)
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("🌐 ساخت گزارش HTML خلاصه (دارای ستون لینک‌های فاکتورها)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            Button(
+                                onClick = {
+                                    val printInvoices = periodInvoices.filter { selectedInvoicesMap[it.id] ?: true }
+                                    if (printInvoices.isEmpty()) {
+                                        Toast.makeText(context, "هیچ فاکتوری علامت‌گذاری نشده است", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        viewModel.sharePdfSummaryReport(
+                                            context = context,
+                                            startDate = startDateInput.ifBlank { "آغاز" },
+                                            endDate = endDateInput.ifBlank { "پایان" },
+                                            invoices = printInvoices
+                                        )
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                                shape = RoundedCornerShape(8.dp),
+                                enabled = periodInvoices.isNotEmpty(),
+                                modifier = Modifier.fillMaxWidth().height(44.dp)
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("📄 ساخت گزارش PDF خلاصه (فقط خلاصه بدون ستون لینک)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
