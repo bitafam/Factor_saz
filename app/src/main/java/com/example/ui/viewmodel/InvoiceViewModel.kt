@@ -34,6 +34,7 @@ import com.example.util.InvoiceBackupManager
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.nio.charset.StandardCharsets
 
 class InvoiceViewModel(
     private val repository: InvoiceRepository,
@@ -118,6 +119,10 @@ class InvoiceViewModel(
     var isLoadingCloudFiles by mutableStateOf(false)
     var cloudFilesError by mutableStateOf<String?>(null)
     var cloudFileSearchQuery by mutableStateOf("")
+
+    // Cloud Backup Management Screen States
+    val cloudBackupsList = mutableStateListOf<CloudFileItem>()
+    var isCloudBackupsLoading by mutableStateOf(false)
 
     val deletedInvoices: StateFlow<List<InvoiceEntity>> = repository.deletedInvoices
         .stateIn(
@@ -1128,11 +1133,12 @@ class InvoiceViewModel(
 
             Toast.makeText(context, "فاکتور ذخیره گردید.$pathInfo", Toast.LENGTH_LONG).show()
 
-            // Auto-upload HTML and sync to ArvanCloud Object Storage in background
+            // Auto-upload HTML and single backup to ArvanCloud Object Storage in background
             val config = repository.getConfigDirect()
             val client = InvoiceCloudSyncManager.createClient(config)
             if (client != null && client.isConfigured) {
                 launch(Dispatchers.IO) {
+                    InvoiceCloudSyncManager.uploadSingleInvoiceBackup(client, backupEntity)
                     val uploadResult = InvoiceCloudSyncManager.uploadInvoiceHtml(client, backupEntity)
                     if (uploadResult.isSuccess) {
                         val url = uploadResult.getOrThrow()
@@ -1140,7 +1146,7 @@ class InvoiceViewModel(
                         repository.updateInvoice(updated)
                         withContext(Dispatchers.Main) {
                             cloudHtmlUrl = url
-                            Toast.makeText(context, "✅ نسخه HTML فاکتور در صندوقچه ابری آروان ثبت و لینک متصل شد.", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "✅ نسخه HTML و بکاپ تکی در صندوقچه ابری آروان ثبت شدند.", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -1582,6 +1588,7 @@ class InvoiceViewModel(
         var importedInvoicesCount = 0
         var duplicatesCount = 0
         val existingList = repository.getAllInvoicesDirect().toMutableList()
+        val successfullyRestored = mutableListOf<InvoiceEntity>()
         for (inv in result.invoices) {
             val exactTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(inv)
             val normalizedInv = if (exactTotal > 0.0) inv.copy(totalAmount = exactTotal) else inv
@@ -1591,8 +1598,21 @@ class InvoiceViewModel(
             }
             val cleanInv = normalizedInv.copy(id = 0, isDeleted = false)
             val newId = repository.insertInvoice(cleanInv)
-            existingList.add(cleanInv.copy(id = newId.toInt()))
+            val inserted = cleanInv.copy(id = newId.toInt())
+            existingList.add(inserted)
+            successfullyRestored.add(inserted)
             importedInvoicesCount++
+        }
+
+        // Upload individual backups of restored invoices to cloud backups/single/
+        viewModelScope.launch(Dispatchers.IO) {
+            val config = repository.getConfigDirect()
+            val client = InvoiceCloudSyncManager.createClient(config)
+            if (client != null && client.isConfigured) {
+                for (inv in successfullyRestored) {
+                    InvoiceCloudSyncManager.uploadSingleInvoiceBackup(client, inv)
+                }
+            }
         }
 
         if (result.config != null) {
@@ -1875,6 +1895,169 @@ class InvoiceViewModel(
             }
         } catch (e: Exception) {
             Toast.makeText(shareContext, "خطا در شروع اشتراک‌گذاری: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // --- Cloud Backups Management Methods ---
+
+    fun loadCloudBackups() {
+        viewModelScope.launch(Dispatchers.IO) {
+            isCloudBackupsLoading = true
+            try {
+                val config = repository.getConfigDirect()
+                val client = InvoiceCloudSyncManager.createClient(config)
+                if (client == null || !client.isConfigured) {
+                    withContext(Dispatchers.Main) {
+                        isCloudBackupsLoading = false
+                        cloudBackupsList.clear()
+                    }
+                    return@launch
+                }
+
+                val listResult = client.listObjects("backups/")
+                if (listResult.isSuccess) {
+                    val items = listResult.getOrThrow().map { obj ->
+                        val isSingle = obj.key.startsWith("backups/single/")
+                        CloudFileItem(
+                            key = obj.key,
+                            fileName = obj.key.substringAfterLast('/'),
+                            folderName = if (isSingle) "بکاپ‌های تکی" else "بکاپ‌های کلی",
+                            sizeBytes = obj.sizeBytes,
+                            lastModified = obj.lastModified,
+                            url = client.getPublicUrl(obj.key),
+                            isHtmlInvoice = false,
+                            isWebpAttachment = false
+                        )
+                    }
+                    withContext(Dispatchers.Main) {
+                        cloudBackupsList.clear()
+                        cloudBackupsList.addAll(items)
+                        isCloudBackupsLoading = false
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        isCloudBackupsLoading = false
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isCloudBackupsLoading = false
+                }
+            }
+        }
+    }
+
+    fun deleteCloudBackup(item: CloudFileItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val config = repository.getConfigDirect()
+                val client = InvoiceCloudSyncManager.createClient(config)
+                if (client != null && client.isConfigured) {
+                    client.deleteObject(item.key)
+                    withContext(Dispatchers.Main) {
+                        cloudBackupsList.remove(item)
+                        Toast.makeText(context, "فایل پشتیبان ابری حذف شد.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "خطا در حذف: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun restoreCloudBackup(item: CloudFileItem) {
+        viewModelScope.launch(Dispatchers.IO) {
+            isBackupOperationLoading = true
+            try {
+                val config = repository.getConfigDirect()
+                val client = InvoiceCloudSyncManager.createClient(config)
+                if (client == null || !client.isConfigured) {
+                    withContext(Dispatchers.Main) {
+                        isBackupOperationLoading = false
+                        Toast.makeText(context, "صندوقچه ابری پیکربندی نشده است.", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+
+                val request = okhttp3.Request.Builder().url(item.url).build()
+                val response = okhttp3.OkHttpClient().newCall(request).execute()
+                if (!response.isSuccessful) {
+                    throw Exception("خطا در دانلود فایل از سرور ابری (${response.code})")
+                }
+                val jsonContent = response.body?.string() ?: throw Exception("محتوای فایل خالی است")
+
+                if (item.key.startsWith("backups/single/")) {
+                    val inv = InvoiceBackupManager.deserializeInvoice(jsonContent)
+                    val exactTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(inv)
+                    val normalized = if (exactTotal > 0.0) inv.copy(totalAmount = exactTotal) else inv
+                    val cleanInv = normalized.copy(id = 0, isDeleted = false)
+                    repository.insertInvoice(cleanInv)
+                    
+                    InvoiceCloudSyncManager.uploadSingleInvoiceBackup(client, cleanInv)
+
+                    withContext(Dispatchers.Main) {
+                        isBackupOperationLoading = false
+                        Toast.makeText(context, "✅ فاکتور تکی با موفقیت بازیابی شد.", Toast.LENGTH_LONG).show()
+                    }
+                } else {
+                    val result = InvoiceBackupManager.parseBackupContent(jsonContent)
+                    applyRestoreResult(context, result)
+                    for (inv in result.invoices) {
+                        InvoiceCloudSyncManager.uploadSingleInvoiceBackup(client, inv)
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isBackupOperationLoading = false
+                    Toast.makeText(context, "خطا در بازیابی از ابر: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    fun createAndUploadFullCloudBackup() {
+        viewModelScope.launch(Dispatchers.IO) {
+            isCloudBackupsLoading = true
+            try {
+                val config = repository.getConfigDirect()
+                val client = InvoiceCloudSyncManager.createClient(config)
+                if (client == null || !client.isConfigured) {
+                    withContext(Dispatchers.Main) {
+                        isCloudBackupsLoading = false
+                        Toast.makeText(context, "لطفاً ابتدا تنظیمات صندوقچه ابری آروان کلود را تکمیل کنید.", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+
+                val invoices = repository.getAllInvoicesDirect()
+                val devices = repository.getAllDevicesDirect()
+                val jsonPkg = InvoiceBackupManager.createFullBackupPackage(invoices, config, devices)
+                val dateStr = JalaliCalendar.getTodayJalali().replace("/", "_")
+                val timeStr = SimpleDateFormat("HH_mm_ss", Locale.US).format(Date())
+                val backupFileName = "full_backup_${dateStr}_$timeStr"
+
+                val fullFolder = InvoiceBackupManager.getFullBackupFolder()
+                val localFile = File(fullFolder, "$backupFileName.json")
+                localFile.writeText(jsonPkg, StandardCharsets.UTF_8)
+
+                val uploadRes = InvoiceCloudSyncManager.uploadFullBackupToCloud(client, jsonPkg, backupFileName)
+                withContext(Dispatchers.Main) {
+                    isCloudBackupsLoading = false
+                    if (uploadRes.isSuccess) {
+                        Toast.makeText(context, "✅ بکاپ کلی با موفقیت در صندوقچه ابری و لوکال ذخیره شد.", Toast.LENGTH_LONG).show()
+                        loadCloudBackups()
+                    } else {
+                        Toast.makeText(context, "خطا در آپلود بکاپ کلی به ابر: ${uploadRes.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    isCloudBackupsLoading = false
+                    Toast.makeText(context, "خطا: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 }

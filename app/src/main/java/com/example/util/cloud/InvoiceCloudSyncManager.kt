@@ -230,4 +230,37 @@ object InvoiceCloudSyncManager {
             updatedInvoices = updatedList
         )
     }
+
+    /**
+     * Uploads an individual invoice backup JSON file to backups/single/ in ArvanCloud S3.
+     * Overwrites if it already exists (to reflect updates).
+     */
+    fun uploadSingleInvoiceBackup(client: ArvanCloudS3Client, invoice: InvoiceEntity): Result<String> {
+        val safeBuyer = invoice.buyerName.trim().replace(Regex("""[\\/:*?"<>|#%&{}\\<>*?/$!'":@+`|=]"""), "_").ifBlank { "مشتری" }
+        val safeNo = invoice.invoiceNo.trim().replace(Regex("""[\\/:*?"<>|#%&{}\\<>*?/$!'":@+`|=]"""), "_").ifBlank { "0" }
+        val key = "backups/single/${safeBuyer}_${safeNo}.json"
+        val jsonStr = com.example.util.InvoiceBackupManager.serializeInvoice(invoice)
+        val bytes = jsonStr.toByteArray(StandardCharsets.UTF_8)
+        return client.putObject(
+            key = key,
+            content = bytes,
+            contentType = "application/json; charset=utf-8",
+            isPublic = true
+        )
+    }
+
+    /**
+     * Uploads a full backup package JSON to backups/full/ in ArvanCloud S3 with date/timestamp naming.
+     */
+    fun uploadFullBackupToCloud(client: ArvanCloudS3Client, jsonPackage: String, backupFileName: String): Result<String> {
+        val safeName = backupFileName.trim().replace(Regex("""[\\/:*?"<>|#%&{}\\<>*?/$!'":@+`|=]"""), "_").ifBlank { "full_backup" }
+        val key = "backups/full/$safeName.json"
+        val bytes = jsonPackage.toByteArray(StandardCharsets.UTF_8)
+        return client.putObject(
+            key = key,
+            content = bytes,
+            contentType = "application/json; charset=utf-8",
+            isPublic = true
+        )
+    }
 }

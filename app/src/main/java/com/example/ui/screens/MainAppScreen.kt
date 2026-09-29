@@ -171,6 +171,7 @@ fun AppNavigationRoot(viewModel: InvoiceViewModel) {
                         "ACCOUNT" -> AccountScreen(viewModel)
                         "SETTINGS" -> SettingsScreen(viewModel)
                         "CLOUD_FILE_MANAGER" -> CloudFileManagerScreen(viewModel)
+                        "CLOUD_BACKUP" -> CloudBackupScreen(viewModel)
                         else -> EditorScreen(viewModel)
                     }
                 }
@@ -4300,6 +4301,22 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("مدیریت فایل‌های ابری", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
+                        }
+
+                        Button(
+                            onClick = {
+                                viewModel.navigateTo("CLOUD_BACKUP")
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().height(40.dp)
+                        ) {
+                            Icon(Icons.Default.Place, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("مدیریت پشتیبان‌های ابری (بکاپ تکی و کلی)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
