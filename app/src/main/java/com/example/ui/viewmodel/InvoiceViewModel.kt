@@ -577,6 +577,11 @@ class InvoiceViewModel(
             arvanCustomDomain = updated.arvanCustomDomain
             arvanAutoSync = updated.arvanAutoSync
             Toast.makeText(context, "تنظیمات صندوقچه ابری آروان با موفقیت ذخیره گردید.", Toast.LENGTH_SHORT).show()
+
+            val client = InvoiceCloudSyncManager.createClient(updated)
+            if (client != null && client.isConfigured) {
+                autoImportBackupsFromCloud(context, updated)
+            }
         }
     }
 
@@ -609,6 +614,18 @@ class InvoiceViewModel(
                     isArvanTestSuccess = true
                     arvanTestStatusMessage = "✅ " + result.getOrThrow()
                     Toast.makeText(context, "اتصال به صندوقچه ابری با موفقیت برقرار شد.", Toast.LENGTH_SHORT).show()
+
+                    // Auto-import backups after verified connection
+                    val currentConfig = repository.getConfigDirect() ?: ConfigEntity(deviceId = LicenseManager.getDeviceId(context))
+                    val updated = currentConfig.copy(
+                        arvanEndpoint = arvanEndpoint,
+                        arvanBucket = arvanBucket,
+                        arvanAccessKey = arvanAccessKey,
+                        arvanSecretKey = arvanSecretKey,
+                        arvanCustomDomain = arvanCustomDomain
+                    )
+                    repository.saveConfig(updated)
+                    autoImportBackupsFromCloud(context, updated)
                 } else {
                     isArvanTestSuccess = false
                     arvanTestStatusMessage = "❌ " + (result.exceptionOrNull()?.message ?: "خطا در اتصال")
@@ -1137,6 +1154,65 @@ class InvoiceViewModel(
     }
 
     // Save active draft to DB for loading/restoring later
+    /**
+     * Synchronizes any invoice creation, modification, or deletion with ArvanCloud S3:
+     * 1. Updates/deletes the individual invoice backup (backups/single/).
+     * 2. Updates the online HTML invoice (if not deleted).
+     * 3. Creates and uploads a full backup package (backups/full/), keeping only the 30 most recent backups.
+     */
+    fun triggerCloudSyncForInvoice(invoice: InvoiceEntity, isDelete: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val config = repository.getConfigDirect()
+                val client = InvoiceCloudSyncManager.createClient(config)
+                if (client != null && client.isConfigured) {
+                    if (isDelete) {
+                        InvoiceCloudSyncManager.deleteSingleInvoiceBackup(client, invoice)
+                    } else {
+                        InvoiceCloudSyncManager.uploadSingleInvoiceBackup(client, invoice)
+                        val uploadResult = InvoiceCloudSyncManager.uploadInvoiceHtml(client, invoice)
+                        if (uploadResult.isSuccess) {
+                            val url = uploadResult.getOrThrow()
+                            val updated = invoice.copy(cloudHtmlUrl = url)
+                            repository.updateInvoice(updated)
+                            if (invoice.id == id) {
+                                withContext(Dispatchers.Main) {
+                                    cloudHtmlUrl = url
+                                }
+                            }
+                        }
+                    }
+
+                    // Auto-update full backup in cloud with maximum 30 retention policy
+                    try {
+                        val allInvoices = repository.getAllInvoicesDirect().filter { !it.isDeleted }
+                        val allDevices = repository.getAllDevicesDirect()
+                        val jsonPkg = InvoiceBackupManager.createFullBackupPackage(allInvoices, config, allDevices)
+                        val dateStr = JalaliCalendar.getTodayJalali().replace("/", "_")
+                        val timeStr = SimpleDateFormat("HH_mm_ss", Locale.US).format(Date())
+                        val backupFileName = "full_backup_${dateStr}_$timeStr"
+                        
+                        val fullFolder = InvoiceBackupManager.getFullBackupFolder()
+                        val localFile = File(fullFolder, "$backupFileName.json")
+                        try { localFile.writeText(jsonPkg, StandardCharsets.UTF_8) } catch (e: Exception) {}
+
+                        InvoiceCloudSyncManager.uploadFullBackupToCloud(client, jsonPkg, backupFileName)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        if (!isDelete) {
+                            Toast.makeText(context, "✅ نسخه HTML، بکاپ تکی و بکاپ کل در صندوقچه ابری بروزرسانی شدند.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     fun saveCurrentInvoice() {
         if (buyerName.isBlank()) {
             Toast.makeText(context, "لطفاً نام خریدار را وارد کنید", Toast.LENGTH_SHORT).show()
@@ -1189,23 +1265,51 @@ class InvoiceViewModel(
 
             Toast.makeText(context, "فاکتور ذخیره گردید.$pathInfo", Toast.LENGTH_LONG).show()
 
-            // Auto-upload HTML and single backup to ArvanCloud Object Storage in background
-            val config = repository.getConfigDirect()
-            val client = InvoiceCloudSyncManager.createClient(config)
-            if (client != null && client.isConfigured) {
-                launch(Dispatchers.IO) {
-                    InvoiceCloudSyncManager.uploadSingleInvoiceBackup(client, backupEntity)
-                    val uploadResult = InvoiceCloudSyncManager.uploadInvoiceHtml(client, backupEntity)
-                    if (uploadResult.isSuccess) {
-                        val url = uploadResult.getOrThrow()
-                        val updated = backupEntity.copy(cloudHtmlUrl = url)
-                        repository.updateInvoice(updated)
-                        withContext(Dispatchers.Main) {
-                            cloudHtmlUrl = url
-                            Toast.makeText(context, "✅ نسخه HTML و بکاپ تکی در صندوقچه ابری آروان ثبت شدند.", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
+            // Auto-sync single backup, HTML, and full backup with ArvanCloud S3
+            triggerCloudSyncForInvoice(backupEntity, isDelete = false)
+        }
+    }
+
+    fun saveCurrentInvoicePdfToDownloads(context: Context) {
+        if (buyerName.isBlank()) {
+            Toast.makeText(context, "لطفاً ابتدا نام خریدار را وارد کنید", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val itemsJson = ItemJsonConverter.serializeInvoiceItems(normalItems)
+        val simpleItemsJson = ItemJsonConverter.serializeSimpleItems(simpleItems)
+        val pctJson = ItemJsonConverter.serializePercentageItems(percentageItems)
+        val attJson = ItemJsonConverter.serializeAttachments(activeAttachments)
+
+        val entity = InvoiceEntity(
+            id = id,
+            invoiceNo = invoiceNo,
+            invoiceDate = invoiceDate,
+            buyerName = buyerName,
+            sellerName = sellerName,
+            sellerPhone = sellerPhone,
+            sellerAddress = sellerAddress,
+            stoneCode = stoneCode,
+            stoneType = stoneType,
+            managerSign = managerSign,
+            salesSign = salesSign,
+            itemsJson = itemsJson,
+            simpleItemsJson = simpleItemsJson,
+            percentageItemsJson = pctJson,
+            invoiceTitle = invoiceTitle,
+            invoiceSubtitle = invoiceSubtitle,
+            totalAmount = grandTotal,
+            managerSignImgBase64 = managerSignImgBase64,
+            salesSignImgBase64 = salesSignImgBase64,
+            cloudHtmlUrl = cloudHtmlUrl,
+            attachmentsJson = attJson
+        )
+
+        Toast.makeText(context, "در حال تولید و ذخیره خودکار فاکتور A4 در پوشه دانلودها...", Toast.LENGTH_SHORT).show()
+        saveInvoicePdfProgrammatically(context, entity) { file ->
+            if (file != null && file.exists()) {
+                Toast.makeText(context, "✅ فاکتور PDF در پوشه دانلودها ذخیره شد:\n${file.absolutePath}", Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, "خطا در ذخیره خودکار فایل PDF", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -1302,6 +1406,7 @@ class InvoiceViewModel(
         viewModelScope.launch {
             repository.setDeletedStatus(invoice.id, true)
             Toast.makeText(context, "فاکتور به سطل زباله منتقل شد. قابل بازیابی در حساب کاربری.", Toast.LENGTH_LONG).show()
+            triggerCloudSyncForInvoice(invoice.copy(isDeleted = true), isDelete = true)
         }
     }
 
@@ -1309,6 +1414,7 @@ class InvoiceViewModel(
         viewModelScope.launch {
             repository.setDeletedStatus(invoice.id, false)
             Toast.makeText(context, "فاکتور با موفقیت بازیابی شد", Toast.LENGTH_SHORT).show()
+            triggerCloudSyncForInvoice(invoice.copy(isDeleted = false), isDelete = false)
         }
     }
 
@@ -1316,6 +1422,7 @@ class InvoiceViewModel(
         viewModelScope.launch {
             repository.deleteInvoice(invoice)
             Toast.makeText(context, "فاکتور برای همیشه حذف شد", Toast.LENGTH_SHORT).show()
+            triggerCloudSyncForInvoice(invoice, isDelete = true)
         }
     }
 
@@ -1970,24 +2077,91 @@ class InvoiceViewModel(
         }
     }
 
+    fun copyInvoiceLink(context: Context, invoice: InvoiceEntity) {
+        if (invoice.cloudHtmlUrl.isNotBlank()) {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val clip = android.content.ClipData.newPlainText("لینک فاکتور", invoice.cloudHtmlUrl)
+            clipboard.setPrimaryClip(clip)
+            Toast.makeText(context, "✅ لینک آنلاین فاکتور در حافظه کپی شد:\n${invoice.cloudHtmlUrl}", Toast.LENGTH_LONG).show()
+        } else {
+            // Attempt on-demand cloud HTML upload
+            viewModelScope.launch(Dispatchers.IO) {
+                val config = repository.getConfigDirect()
+                val client = InvoiceCloudSyncManager.createClient(config)
+                if (client != null && client.isConfigured) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "در حال ایجاد لینک آنلاین فاکتور در صندوقچه ابری...", Toast.LENGTH_SHORT).show()
+                    }
+                    val uploadResult = InvoiceCloudSyncManager.uploadInvoiceHtml(client, invoice)
+                    if (uploadResult.isSuccess) {
+                        val url = uploadResult.getOrThrow()
+                        val updated = invoice.copy(cloudHtmlUrl = url)
+                        repository.updateInvoice(updated)
+                        withContext(Dispatchers.Main) {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("لینک فاکتور", url)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "✅ لینک فاکتور با موفقیت در صندوقچه ایجاد و در حافظه کپی شد:\n$url", Toast.LENGTH_LONG).show()
+                        }
+                        return@launch
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "صندوقچه ابری هنوز تنظیم نشده است. لطفاً ابتدا در تنظیمات مشخصات صندوقچه را وارد کنید یا از خروجی PDF فاکتور استفاده نمایید.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    fun shareInvoiceLink(context: Context, invoice: InvoiceEntity) {
+        if (invoice.cloudHtmlUrl.isNotBlank()) {
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(android.content.Intent.EXTRA_SUBJECT, "لینک آنلاین فاکتور ${invoice.buyerName}")
+                putExtra(android.content.Intent.EXTRA_TEXT, "مشاهده آنلاین فاکتور:\n${invoice.cloudHtmlUrl}")
+            }
+            context.startActivity(android.content.Intent.createChooser(intent, "اشتراک‌گذاری لینک فاکتور"))
+        } else {
+            // Attempt on-demand cloud HTML upload
+            viewModelScope.launch(Dispatchers.IO) {
+                val config = repository.getConfigDirect()
+                val client = InvoiceCloudSyncManager.createClient(config)
+                if (client != null && client.isConfigured) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "در حال آپلود فاکتور در صندوقچه برای دریافت لینک...", Toast.LENGTH_SHORT).show()
+                    }
+                    val uploadResult = InvoiceCloudSyncManager.uploadInvoiceHtml(client, invoice)
+                    if (uploadResult.isSuccess) {
+                        val url = uploadResult.getOrThrow()
+                        val updated = invoice.copy(cloudHtmlUrl = url)
+                        repository.updateInvoice(updated)
+                        withContext(Dispatchers.Main) {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(android.content.Intent.EXTRA_SUBJECT, "لینک آنلاین فاکتور ${invoice.buyerName}")
+                                putExtra(android.content.Intent.EXTRA_TEXT, "مشاهده آنلاین فاکتور:\n$url")
+                            }
+                            context.startActivity(android.content.Intent.createChooser(intent, "اشتراک‌گذاری لینک فاکتور"))
+                        }
+                        return@launch
+                    }
+                }
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "صندوقچه ابری هنوز تنظیم نشده است. لطفاً ابتدا در تنظیمات مشخصات صندوقچه را وارد کنید یا از خروجی PDF فاکتور استفاده نمایید.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     fun sharePdfInvoice(context: Context, invoice: InvoiceEntity) {
         try {
-            val safeBuyer = invoice.buyerName.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
-            val safeNo = invoice.invoiceNo.trim().replace(Regex("[\\\\/:*?\"<>|]"), "_")
-            val fileName = "فاکتور_${safeBuyer}_${safeNo}.pdf"
-            val pdfDir = InvoiceBackupManager.getPdfFolder()
-            val pdfFile = File(pdfDir, fileName)
-            
-            if (pdfFile.exists() && pdfFile.length() > 0) {
-                startShareIntent(context, pdfFile, "اشتراک‌گذاری فاکتور (نسخه PDF)")
-            } else {
-                Toast.makeText(context, "در حال تولید فایل PDF فاکتور...", Toast.LENGTH_SHORT).show()
-                saveInvoicePdfProgrammatically(context, invoice) { file ->
-                    if (file != null && file.exists()) {
-                        startShareIntent(context, file, "اشتراک‌گذاری فاکتور (نسخه PDF)")
-                    } else {
-                        Toast.makeText(context, "خطا در تولید PDF", Toast.LENGTH_SHORT).show()
-                    }
+            Toast.makeText(context, "در حال تولید و ذخیره خودکار فاکتور PDF در پوشه دانلودها...", Toast.LENGTH_SHORT).show()
+            saveInvoicePdfProgrammatically(context, invoice) { file ->
+                if (file != null && file.exists()) {
+                    Toast.makeText(context, "✅ فاکتور PDF در پوشه دانلودها ذخیره شد:\n${file.absolutePath}", Toast.LENGTH_LONG).show()
+                    startShareIntent(context, file, "اشتراک‌گذاری فاکتور (نسخه PDF)")
+                } else {
+                    Toast.makeText(context, "خطا در تولید فایل PDF فاکتور", Toast.LENGTH_SHORT).show()
                 }
             }
         } catch (e: Exception) {
@@ -2001,10 +2175,10 @@ class InvoiceViewModel(
             val safeStart = startDate.replace("/", ".")
             val safeEnd = endDate.replace("/", ".")
             val fileName = "خلاصه_فاکتورها_از_${safeStart}_تا_${safeEnd}.html"
-            val htmlDir = File(context.cacheDir, "html_exports")
-            if (!htmlDir.exists()) htmlDir.mkdirs()
-            val file = File(htmlDir, fileName)
+            val summaryDir = InvoiceBackupManager.getSummaryFolder()
+            val file = File(summaryDir, fileName)
             file.writeText(html, Charsets.UTF_8)
+            Toast.makeText(context, "✅ گزارش HTML در پوشه دانلودها ذخیره شد:\n${file.absolutePath}", Toast.LENGTH_LONG).show()
             startShareIntent(context, file, "اشتراک‌گذاری گزارش خلاصه (نسخه HTML)")
         } catch (e: Exception) {
             Toast.makeText(context, "خطا در ساخت گزارش HTML: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -2016,6 +2190,7 @@ class InvoiceViewModel(
             Toast.makeText(context, "در حال تولید فایل PDF خلاصه گزارش...", Toast.LENGTH_SHORT).show()
             saveSummaryPdfProgrammatically(context, startDate, endDate, invoices) { file ->
                 if (file != null && file.exists()) {
+                    Toast.makeText(context, "✅ گزارش PDF در پوشه دانلودها ذخیره شد:\n${file.absolutePath}", Toast.LENGTH_LONG).show()
                     startShareIntent(context, file, "اشتراک‌گذاری گزارش خلاصه (نسخه PDF)")
                 } else {
                     Toast.makeText(context, "خطا در تولید PDF گزارش خلاصه", Toast.LENGTH_SHORT).show()
@@ -2023,6 +2198,79 @@ class InvoiceViewModel(
             }
         } catch (e: Exception) {
             Toast.makeText(context, "خطا در اشتراک‌گذاری PDF خلاصه: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun autoImportBackupsFromCloud(context: Context, config: ConfigEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val client = InvoiceCloudSyncManager.createClient(config) ?: return@launch
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "در حال بررسی و بازیابی خودکار بکاپ‌ها از صندوقچه ابری...", Toast.LENGTH_SHORT).show()
+                }
+
+                var restoredCount = 0
+
+                // 1. Try full backups first
+                val fullListRes = client.listObjects("backups/full/")
+                if (fullListRes.isSuccess) {
+                    val fullBackups = fullListRes.getOrThrow()
+                        .filter { it.key.endsWith(".json") }
+                        .sortedByDescending { it.lastModified }
+                    if (fullBackups.isNotEmpty()) {
+                        val latestFull = fullBackups.first()
+                        val bytesRes = client.getObject(latestFull.key)
+                        if (bytesRes.isSuccess) {
+                            val json = String(bytesRes.getOrThrow(), StandardCharsets.UTF_8)
+                            val result = InvoiceBackupManager.parseBackupContent(json)
+                            if (result.invoices.isNotEmpty()) {
+                                applyRestoreResult(context, result)
+                                restoredCount += result.invoices.size
+                            }
+                        }
+                    }
+                }
+
+                // 2. Also check single invoice backups to merge any singles
+                val singleListRes = client.listObjects("backups/single/")
+                if (singleListRes.isSuccess) {
+                    val singleBackups = singleListRes.getOrThrow().filter { it.key.endsWith(".json") }
+                    for (singleItem in singleBackups) {
+                        try {
+                            val bytesRes = client.getObject(singleItem.key)
+                            if (bytesRes.isSuccess) {
+                                val json = String(bytesRes.getOrThrow(), StandardCharsets.UTF_8)
+                                val inv = InvoiceBackupManager.deserializeInvoice(json)
+                                if (inv.buyerName.isNotBlank()) {
+                                    val exactTotal = HtmlInvoiceGenerator.calculateInvoiceTotal(inv)
+                                    val normalized = if (exactTotal > 0.0) inv.copy(totalAmount = exactTotal) else inv
+                                    val existing = repository.getAllInvoicesDirect().find { it.invoiceNo == normalized.invoiceNo }
+                                    if (existing == null) {
+                                        repository.insertInvoice(normalized.copy(id = 0, isDeleted = false))
+                                        restoredCount++
+                                    } else {
+                                        repository.updateInvoice(normalized.copy(id = existing.id, isDeleted = false))
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    if (restoredCount > 0) {
+                        Toast.makeText(context, "✅ بکاپ‌های موجود در صندوقچه ابری با موفقیت در برنامه بازیابی و همگام شدند ($restoredCount فاکتور).", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(context, "اتصال به صندوقچه ابری برقرار شد.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "خطا در بازیابی خودکار از صندوقچه: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 

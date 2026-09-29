@@ -66,16 +66,27 @@ object InvoiceBackupManager {
         return f
     }
 
+    /**
+     * Gets the public Downloads directory where PDF and HTML files are exported.
+     */
+    fun getDownloadsDir(): File {
+        val dlDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!dlDir.exists()) {
+            dlDir.mkdirs()
+        }
+        return dlDir
+    }
+
+    fun getDownloadsRoot(): File {
+        return getDownloadsDir()
+    }
+
     fun getPdfFolder(): File {
-        val f = File(getAppPublicRoot(), PDF_DIR_NAME)
-        if (!f.exists()) f.mkdirs()
-        return f
+        return getDownloadsDir()
     }
 
     fun getSummaryFolder(): File {
-        val f = File(getAppPublicRoot(), SUMMARY_DIR_NAME)
-        if (!f.exists()) f.mkdirs()
-        return f
+        return getDownloadsDir()
     }
 
     fun getLicenseFolder(): File {

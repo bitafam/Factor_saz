@@ -250,17 +250,49 @@ object InvoiceCloudSyncManager {
     }
 
     /**
+     * Deletes an individual invoice backup JSON file from backups/single/ in ArvanCloud S3.
+     */
+    fun deleteSingleInvoiceBackup(client: ArvanCloudS3Client, invoice: InvoiceEntity): Result<Boolean> {
+        val safeBuyer = invoice.buyerName.trim().replace(Regex("""[\\/:*?"<>|#%&{}\\<>*?/$!'":@+`|=]"""), "_").ifBlank { "مشتری" }
+        val safeNo = invoice.invoiceNo.trim().replace(Regex("""[\\/:*?"<>|#%&{}\\<>*?/$!'":@+`|=]"""), "_").ifBlank { "0" }
+        val key = "backups/single/${safeBuyer}_${safeNo}.json"
+        return client.deleteObject(key)
+    }
+
+    /**
      * Uploads a full backup package JSON to backups/full/ in ArvanCloud S3 with date/timestamp naming.
      */
     fun uploadFullBackupToCloud(client: ArvanCloudS3Client, jsonPackage: String, backupFileName: String): Result<String> {
         val safeName = backupFileName.trim().replace(Regex("""[\\/:*?"<>|#%&{}\\<>*?/$!'":@+`|=]"""), "_").ifBlank { "full_backup" }
         val key = "backups/full/$safeName.json"
         val bytes = jsonPackage.toByteArray(StandardCharsets.UTF_8)
-        return client.putObject(
+        val putResult = client.putObject(
             key = key,
             content = bytes,
             contentType = "application/json; charset=utf-8",
             isPublic = true
         )
+
+        if (putResult.isSuccess) {
+            // Retention policy: Keep maximum 30 full backups in cloud.
+            // If count exceeds 30 (e.g. 31), delete the oldest full backup(s).
+            try {
+                val listRes = client.listObjects("backups/full/")
+                if (listRes.isSuccess) {
+                    val fullBackups = listRes.getOrThrow().filter { it.key.endsWith(".json") }
+                    if (fullBackups.size > 30) {
+                        val sortedByAge = fullBackups.sortedBy { it.lastModified }
+                        val toDeleteCount = fullBackups.size - 30
+                        for (i in 0 until toDeleteCount) {
+                            client.deleteObject(sortedByAge[i].key)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        return putResult
     }
 }

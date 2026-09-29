@@ -224,6 +224,81 @@ class ArvanCloudS3Client(
     }
 
     /**
+     * Downloads/reads an object's raw bytes from ArvanCloud S3.
+     */
+    fun getObject(key: String): Result<ByteArray> {
+        if (!isConfigured) {
+            return Result.failure(Exception("اطلاعات اتصال به آروان کلود وارد نشده است."))
+        }
+        return try {
+            val cleanEndpoint = endpoint.trim().removePrefix("https://").removePrefix("http://").removeSuffix("/")
+            val cleanBucket = bucket.trim()
+            val host = "$cleanBucket.$cleanEndpoint"
+            val cleanKey = key.trim().removePrefix("/")
+            val encodedPath = "/" + cleanKey.split("/").joinToString("/") { 
+                URLEncoder.encode(it, "UTF-8").replace("+", "%20") 
+            }
+
+            val url = "https://$host$encodedPath"
+
+            val dateStamp = getFormattedDate("yyyyMMdd")
+            val amzDate = getFormattedDate("yyyyMMdd'T'HHmmss'Z'")
+            val payloadHash = sha256Hex(ByteArray(0))
+
+            val headersToSign = sortedMapOf(
+                "host" to host,
+                "x-amz-content-sha256" to payloadHash,
+                "x-amz-date" to amzDate
+            )
+
+            val canonicalHeaders = headersToSign.entries.joinToString("\n") { "${it.key}:${it.value}" } + "\n"
+            val signedHeaders = headersToSign.keys.joinToString(";")
+
+            val canonicalRequest = listOf(
+                "GET",
+                encodedPath,
+                "",
+                canonicalHeaders,
+                signedHeaders,
+                payloadHash
+            ).joinToString("\n")
+
+            val credentialScope = "$dateStamp/$region/$service/aws4_request"
+            val stringToSign = listOf(
+                "AWS4-HMAC-SHA256",
+                amzDate,
+                credentialScope,
+                sha256Hex(canonicalRequest.toByteArray(StandardCharsets.UTF_8))
+            ).joinToString("\n")
+
+            val signingKey = getSignatureKey(secretKey, dateStamp, region, service)
+            val signature = hmacHex(signingKey, stringToSign)
+
+            val authHeader = "AWS4-HMAC-SHA256 Credential=$accessKey/$credentialScope, SignedHeaders=$signedHeaders, Signature=$signature"
+
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .header("Host", host)
+                .header("x-amz-date", amzDate)
+                .header("x-amz-content-sha256", payloadHash)
+                .header("Authorization", authHeader)
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (response.isSuccessful) {
+                val bytes = response.body?.bytes() ?: ByteArray(0)
+                Result.success(bytes)
+            } else {
+                val errorMsg = parseS3ErrorMessage(response.body?.string() ?: "") ?: "کد خطا: ${response.code}"
+                Result.failure(Exception("خطا در دریافت فایل از صندوقچه: $errorMsg"))
+            }
+        } catch (e: Exception) {
+            Result.failure(Exception("خطای دریافت فایل از آروان کلود: ${e.message}"))
+        }
+    }
+
+    /**
      * Deletes an object from ArvanCloud S3 bucket.
      */
     fun deleteObject(key: String): Result<Boolean> {

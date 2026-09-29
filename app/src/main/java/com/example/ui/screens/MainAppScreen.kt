@@ -1595,7 +1595,7 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
                     }
                 }
 
-                // 7. Core Invoice Operation Buttons
+                // 7. Core Invoice Operation Buttons (Exactly 4 requested actions)
                 item {
                     Card(
                         shape = RoundedCornerShape(12.dp),
@@ -1603,29 +1603,30 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Row 1: Save Invoice & Save PDF
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Button(
-                                    onClick = { viewModel.printCurrentInvoice(context) },
+                                    onClick = { viewModel.saveCurrentInvoice() },
                                     colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                        containerColor = Color(0xFF00796B),
+                                        contentColor = Color.White
                                     ),
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier
                                         .weight(1f)
                                         .height(48.dp)
-                                        .testTag("print_invoice_hardware_button")
+                                        .testTag("save_invoice_button")
                                 ) {
-                                    Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("چاپ مستقیم (پرینت)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("ذخیره فاکتور", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
 
                                 Button(
-                                    onClick = { viewModel.printCurrentInvoice(context) },
+                                    onClick = { viewModel.saveCurrentInvoicePdfToDownloads(context) },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.primaryContainer,
                                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -1634,19 +1635,37 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
                                     modifier = Modifier
                                         .weight(1f)
                                         .height(48.dp)
-                                        .testTag("print_invoice_pdf_button")
+                                        .testTag("save_pdf_button")
                                 ) {
                                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("ذخیره / خروجی PDF", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("ذخیره PDF (A4)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
 
+                            // Row 2: Print & Share & Empty Invoice
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                                   OutlinedButton(
+                                Button(
+                                    onClick = { viewModel.printCurrentInvoice(context) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(46.dp)
+                                        .testTag("print_invoice_hardware_button")
+                                ) {
+                                    Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("پرینت و اشتراک‌گذاری", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                OutlinedButton(
                                     onClick = { viewModel.createNewInvoice() },
                                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                                     shape = RoundedCornerShape(8.dp),
@@ -1655,12 +1674,12 @@ fun EditorScreen(viewModel: InvoiceViewModel) {
                                     ),
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(44.dp)
+                                        .height(46.dp)
                                         .testTag("clear_editor_button")
                                 ) {
                                     Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("فاکتور جدید/خالی", fontSize = 12.sp)
+                                    Text("فاکتور خالی", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -2701,31 +2720,49 @@ fun HistoryScreen(viewModel: InvoiceViewModel) {
             val inv = invoiceForShareChoice!!
             AlertDialog(
                 onDismissRequest = { invoiceForShareChoice = null },
-                title = { Text("انتخاب فرمت خروجی / اشتراک‌گذاری فاکتور", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
-                text = { Text("لطفاً فرمت فایل فاکتور را برای اشتراک‌گذاری یا ذخیره انتخاب کنید:", fontSize = 12.sp) },
+                title = { Text("اشتراک‌گذاری فاکتور", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
+                text = { Text("فایل PDF (ذخیره شده در دانلودها) یا لینک آنلاین فاکتور را برای ارسال انتخاب کنید:", fontSize = 12.sp) },
                 confirmButton = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         Button(
                             onClick = {
                                 invoiceForShareChoice = null
-                                viewModel.shareHtmlInvoice(context, inv)
+                                viewModel.sharePdfInvoice(context, inv)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("🌐 نسخه HTML (همراه با دکمه‌های ضمیمه و لینک آنلاین)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("📄 اشتراک‌گذاری PDF و ذخیره در دانلودها", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
+
                         Button(
                             onClick = {
                                 invoiceForShareChoice = null
-                                viewModel.sharePdfInvoice(context, inv)
+                                viewModel.shareInvoiceLink(context, inv)
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("📄 نسخه PDF (فایل استاندارد بدون ضمیمه)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("🔗 اشتراک‌گذاری لینک آنلاین فاکتور", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                invoiceForShareChoice = null
+                                viewModel.copyInvoiceLink(context, inv)
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("📋 کپی لینک آنلاین فاکتور", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 },
@@ -3568,7 +3605,7 @@ fun AccountScreen(viewModel: InvoiceViewModel) {
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("🌐 ساخت گزارش HTML خلاصه (دارای ستون لینک‌های فاکتورها)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("🌐 ذخیره HTML خلاصه در پوشه دانلودها (با ستون لینک‌ها)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
 
                             Button(
@@ -3592,7 +3629,7 @@ fun AccountScreen(viewModel: InvoiceViewModel) {
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("📄 ساخت گزارش PDF خلاصه (فقط خلاصه بدون ستون لینک)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("📄 ذخیره PDF خلاصه در پوشه دانلودها (بدون ستون لینک)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -4323,6 +4360,30 @@ fun SettingsScreen(viewModel: InvoiceViewModel) {
                                     lineHeight = 16.sp
                                 )
                             }
+                        }
+
+                        // Direct save & auto-import button for cloud
+                        Button(
+                            onClick = {
+                                viewModel.updateArvanCloudSettings(
+                                    endpoint = arvanEndpointInput,
+                                    bucket = arvanBucketInput,
+                                    accessKey = arvanAccessKeyInput,
+                                    secretKey = arvanSecretKeyInput,
+                                    customDomain = arvanCustomDomainInput,
+                                    autoSync = arvanAutoSyncInput
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF00796B),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
+                        ) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("ذخیره تنظیمات صندوقچه و درون‌ریزی خودکار بکاپ‌ها", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
 
                         // Action Buttons inside Arvan Card
